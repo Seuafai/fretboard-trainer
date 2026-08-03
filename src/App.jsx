@@ -77,7 +77,7 @@ function autoCorrelate(buf, sampleRate) {
   let rms = 0;
   for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
   rms = Math.sqrt(rms / SIZE);
-  if (rms < 0.012) return { freq: null, clarity: 0 };
+  if (rms < 0.004) return { freq: null, clarity: 0, rms };
 
   let r1 = 0,
     r2 = SIZE - 1;
@@ -96,7 +96,7 @@ function autoCorrelate(buf, sampleRate) {
   }
   const trimmed = buf.slice(r1, r2);
   const n = trimmed.length;
-  if (n < 8) return { freq: null, clarity: 0 };
+  if (n < 8) return { freq: null, clarity: 0, rms };
   const c = new Float32Array(n);
   for (let lag = 0; lag < n; lag++) {
     let sum = 0;
@@ -113,7 +113,7 @@ function autoCorrelate(buf, sampleRate) {
       maxPos = i;
     }
   }
-  if (maxPos <= 0) return { freq: null, clarity: 0 };
+  if (maxPos <= 0) return { freq: null, clarity: 0, rms };
   const x1 = c[maxPos - 1] ?? c[maxPos];
   const x2 = c[maxPos];
   const x3 = c[maxPos + 1] ?? c[maxPos];
@@ -123,8 +123,8 @@ function autoCorrelate(buf, sampleRate) {
   if (a) T0 = maxPos - b / (2 * a);
   const freq = sampleRate / T0;
   const clarity = c[0] ? maxVal / c[0] : 0;
-  if (freq < 55 || freq > 900) return { freq: null, clarity: 0 };
-  return { freq, clarity };
+  if (freq < 55 || freq > 900) return { freq: null, clarity: 0, rms };
+  return { freq, clarity, rms };
 }
 
 function extractFingerprint(freqBytes, f0, sampleRate, fftSize) {
@@ -167,13 +167,23 @@ function useMic() {
     setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: 1,
+          // non-standard flags some Chromium builds honor to disable extra processing
+          googEchoCancellation: false,
+          googAutoGainControl: false,
+          googNoiseSuppression: false,
+          googHighpassFilter: false,
+        },
       });
       const Ctx = window.AudioContext || window.webkitAudioContext;
       const ctx = new Ctx();
       const source = ctx.createMediaStreamSource(stream);
       const timeAnalyser = ctx.createAnalyser();
-      timeAnalyser.fftSize = 2048;
+      timeAnalyser.fftSize = 4096;
       const freqAnalyser = ctx.createAnalyser();
       freqAnalyser.fftSize = 8192;
       freqAnalyser.smoothingTimeConstant = 0;
@@ -212,12 +222,13 @@ function useMic() {
     if (!ctx || !timeAnalyser || !freqAnalyser) return null;
     const buf = timeBufRef.current;
     timeAnalyser.getFloatTimeDomainData(buf);
-    const { freq, clarity } = autoCorrelate(buf, ctx.sampleRate);
-    if (!freq || clarity < 0.85) return null;
+    const { freq, clarity, rms } = autoCorrelate(buf, ctx.sampleRate);
+    const confident = !!freq && clarity >= 0.7;
+    if (!freq) return { freq: null, clarity, rms, confident: false, fingerprint: null };
     const freqBytes = freqBufRef.current;
     freqAnalyser.getByteFrequencyData(freqBytes);
     const fingerprint = extractFingerprint(freqBytes, freq, ctx.sampleRate, freqAnalyser.fftSize);
-    return { freq, clarity, fingerprint };
+    return { freq, clarity, rms, confident, fingerprint };
   }, []);
 
   useEffect(() => () => stop(), [stop]);
@@ -462,6 +473,7 @@ function TunerPage({ mic, tuning, onUpdateTuning }) {
   const [detectedString, setDetectedString] = useState(null);
   const [lockProgress, setLockProgress] = useState(0);
   const [justLocked, setJustLocked] = useState(null);
+  const [debug, setDebug] = useState(null);
   const stableStartRef = useRef(null);
   const captureBufRef = useRef([]);
   const intervalRef = useRef(null);
@@ -470,7 +482,9 @@ function TunerPage({ mic, tuning, onUpdateTuning }) {
     if (mic.status !== "active") return;
     intervalRef.current = setInterval(() => {
       const s = mic.sample();
-      if (!s) {
+      if (!s) return;
+      setDebug({ freq: s.freq, clarity: s.clarity, rms: s.rms, confident: s.confident });
+      if (!s.freq) {
         setReading(null);
         setDetectedString(null);
         stableStartRef.current = null;
@@ -497,7 +511,7 @@ function TunerPage({ mic, tuning, onUpdateTuning }) {
       setDetectedString(best.id);
       setReading({ cents: bestCents, freq: s.freq });
 
-      if (Math.abs(bestCents) < 4) {
+      if (Math.abs(bestCents) < 4 && s.confident) {
         if (!stableStartRef.current) {
           stableStartRef.current = Date.now();
           captureBufRef.current = [];
@@ -557,6 +571,11 @@ function TunerPage({ mic, tuning, onUpdateTuning }) {
           </span>
         ) : (
           <span style={{ fontSize: 13, color: "#5a6270" }}>{mic.status === "active" ? "waiting for a string…" : ""}</span>
+        )}
+        {mic.status === "active" && (
+          <div className="ft-mono" style={{ fontSize: 11, color: "#5a6270", marginTop: 6 }}>
+            debug — freq: {debug && debug.freq ? `${debug.freq.toFixed(1)}Hz` : "none"} · clarity: {debug ? debug.clarity.toFixed(2) : "–"} · volume: {debug ? debug.rms.toFixed(4) : "–"} · confident: {debug ? String(debug.confident) : "–"}
+          </div>
         )}
       </div>
 
@@ -768,7 +787,7 @@ function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune }) {
     if (mic.status !== "active") return;
     intervalRef.current = setInterval(() => {
       const s = mic.sample();
-      if (!s) return;
+      if (!s || !s.freq) return;
       const { name } = freqToNote(s.freq);
       setReading({ name });
       if (name !== note) return;
