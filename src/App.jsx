@@ -64,11 +64,6 @@ function freqToNote(freq) {
 function centsBetween(freq, target) {
   return 1200 * Math.log2(freq / target);
 }
-function getOpenFreq(stringId, tuning, guitarStrings) {
-  const t = tuning && tuning[stringId];
-  if (t && t.freq) return t.freq;
-  return guitarStrings.find((s) => s.id === stringId).openFreq;
-}
 function timeAgo(ts) {
   if (!ts) return null;
   const diff = Date.now() - ts;
@@ -176,12 +171,6 @@ function extractFingerprint(freqBytes, f0, sampleRate, fftSize) {
   const ratios = [];
   for (let k = 2; k <= 6; k++) ratios.push(ampAt(f0 * k) / a1);
   return ratios;
-}
-function fingerprintDistance(a, b) {
-  if (!a || !b) return Infinity;
-  let sum = 0;
-  for (let i = 0; i < a.length; i++) sum += (a[i] - b[i]) * (a[i] - b[i]);
-  return Math.sqrt(sum);
 }
 
 // ---------- mic hook ----------
@@ -798,27 +787,6 @@ function IdentifyMode({ maxFret, activeStrings, guitarStrings }) {
 
 // ---------- Find It mode ----------
 
-function computeGroups(note, maxFret, activeStrings, tuning, guitarStrings) {
-  const positions = [];
-  guitarStrings.forEach((s) => {
-    if (!activeStrings.includes(s.id)) return;
-    const openFreq = getOpenFreq(s.id, tuning, guitarStrings);
-    const openIdx = CHROMATIC.indexOf(s.open);
-    const targetIdx = CHROMATIC.indexOf(note);
-    const fret = (targetIdx - openIdx + 12) % 12;
-    positions.push({ stringId: s.id, fret, freq: freqAt(openFreq, fret) });
-    if (fret + 12 <= maxFret) positions.push({ stringId: s.id, fret: fret + 12, freq: freqAt(openFreq, fret + 12) });
-  });
-  const groups = [];
-  positions.forEach((p) => {
-    const g = groups.find((g) => Math.abs(1200 * Math.log2(g.freq / p.freq)) < 15);
-    if (g) g.positions.push(p);
-    else groups.push({ freq: p.freq, positions: [p], credited: [] });
-  });
-  groups.sort((a, b) => a.freq - b.freq);
-  return groups;
-}
-
 function nearestPosition(freq, guitarStrings, activeStrings, maxFret) {
   let best = null,
     bestCents = Infinity;
@@ -838,9 +806,9 @@ function nearestPosition(freq, guitarStrings, activeStrings, maxFret) {
 
 function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune, guitarStrings }) {
   const [note, setNote] = useState(() => CHROMATIC[Math.floor(Math.random() * 12)]);
-  const [groups, setGroups] = useState(() => computeGroups(note, maxFret, activeStrings, tuning, guitarStrings));
   const [reading, setReading] = useState(null);
   const [flash, setFlash] = useState(null); // { stringId, fret, color } — temporary, auto-clears
+  const [correctCount, setCorrectCount] = useState(0);
   const intervalRef = useRef(null);
   const lastMatchRef = useRef(0);
   const lastWrongRef = useRef(0);
@@ -853,11 +821,6 @@ function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune, guitarStrings
   }, []);
 
   useEffect(() => {
-    setGroups(computeGroups(note, maxFret, activeStrings, tuning, guitarStrings));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note, maxFret, activeStrings, guitarStrings]);
-
-  useEffect(() => {
     if (mic.status !== "active") return;
     intervalRef.current = setInterval(() => {
       const s = mic.sample();
@@ -865,59 +828,33 @@ function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune, guitarStrings
       const { name } = freqToNote(s.freq);
       setReading({ name });
       const now = Date.now();
+      const pos = nearestPosition(s.freq, guitarStrings, activeStrings, maxFret);
+      if (!pos) return;
 
       if (name !== note) {
         if (now - lastWrongRef.current < 500) return;
         lastWrongRef.current = now;
-        const pos = nearestPosition(s.freq, guitarStrings, activeStrings, maxFret);
-        if (pos) triggerFlash(pos.stringId, pos.fret, "#d9694e", 650);
+        triggerFlash(pos.stringId, pos.fret, "#d9694e", 650);
         return;
       }
       if (now - lastMatchRef.current < 500) return;
-
-      setGroups((prev) => {
-        const groupIdx = prev.findIndex((g) => Math.abs(1200 * Math.log2(g.freq / s.freq)) < 40);
-        if (groupIdx === -1) return prev;
-        const group = prev[groupIdx];
-        const candidates = group.positions.filter((p) => !(group.credited || []).includes(p.stringId));
-        if (candidates.length === 0) return prev;
-        let chosen = candidates[0];
-        if (candidates.length > 1) {
-          let bestDist = Infinity;
-          candidates.forEach((c) => {
-            const fp = tuning && tuning[c.stringId] && tuning[c.stringId].fingerprint;
-            const dist = fingerprintDistance(s.fingerprint, fp);
-            if (dist < bestDist) {
-              bestDist = dist;
-              chosen = c;
-            }
-          });
-        }
-        lastMatchRef.current = now;
-        triggerFlash(chosen.stringId, chosen.fret, "#7cb37a", 1800);
-        const next = [...prev];
-        next[groupIdx] = { ...group, credited: [...(group.credited || []), chosen.stringId] };
-        return next;
-      });
+      lastMatchRef.current = now;
+      triggerFlash(pos.stringId, pos.fret, "#7cb37a", 1800);
+      setCorrectCount((c) => c + 1);
     }, 110);
     return () => {
       clearInterval(intervalRef.current);
       clearTimeout(flashTimeoutRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mic.status, note, tuning, guitarStrings, activeStrings, maxFret]);
+  }, [mic.status, note, guitarStrings, activeStrings, maxFret]);
 
-  const totalPositions = groups.reduce((sum, g) => sum + g.positions.length, 0);
-  const foundPositions = groups.reduce((sum, g) => sum + (g.credited ? g.credited.length : 0), 0);
-  const allFound = totalPositions > 0 && foundPositions >= totalPositions;
   const tunedCount = guitarStrings.filter((s) => tuning && tuning[s.id]).length;
-
-  // the fretboard itself only ever shows the temporary flash now (green = correct, red = wrong);
-  // found/total progress is still tracked in `groups`/credited, just not drawn as a lingering marker.
   const markers = flash ? [{ stringId: flash.stringId, fret: flash.fret, filled: true, color: flash.color }] : [];
 
   function newNote() {
     setNote(CHROMATIC[Math.floor(Math.random() * 12)]);
+    setCorrectCount(0);
     setFlash(null);
     clearTimeout(flashTimeoutRef.current);
   }
@@ -926,7 +863,7 @@ function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune, guitarStrings
     <div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 20 }}>
         <StatCard label="Target note" value={note} />
-        <StatCard label="Found" value={`${foundPositions} / ${totalPositions}`} />
+        <StatCard label="Correct hits" value={correctCount} />
         <StatCard label="Strings tuned" value={`${tunedCount} / ${guitarStrings.length}`} />
       </div>
 
@@ -936,7 +873,7 @@ function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune, guitarStrings
           <button className="ft-primary-btn" onClick={() => mic.start()} disabled={mic.status === "requesting"}>
             {mic.status === "requesting" ? "Requesting mic…" : "Enable microphone"}
           </button>
-          {mic.status === "error" && <p style={{ color: "#e08a71", fontSize: 13, marginTop: 12 }}>{mic.error} — you can still tap positions manually below.</p>}
+          {mic.status === "error" && <p style={{ color: "#e08a71", fontSize: 13, marginTop: 12 }}>{mic.error}</p>}
         </div>
       )}
 
@@ -945,31 +882,18 @@ function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune, guitarStrings
       </div>
 
       <div style={{ textAlign: "center", marginBottom: 18, minHeight: 40 }}>
-        {allFound ? (
-          <>
-            <div className="ft-title" style={{ fontSize: 18, color: "#8fbb7f", marginBottom: 10 }}>
-              Found every {note} on the neck
-            </div>
-            <button className="ft-primary-btn" onClick={newNote}>
-              Next note
-            </button>
-          </>
-        ) : (
-          <div style={{ fontSize: 14, color: "#9aa2ac" }}>
-            Play every <strong style={{ color: "#f3ead9" }}>{note}</strong> within your fret range — any string, any octave.
-          </div>
-        )}
+        <div style={{ fontSize: 14, color: "#9aa2ac" }}>
+          Play <strong style={{ color: "#f3ead9" }}>{note}</strong> anywhere on the neck — any string, any octave, as many times as you like.
+        </div>
       </div>
 
-      {!allFound && (
-        <div style={{ textAlign: "center", marginBottom: 10 }}>
-          <button onClick={newNote} style={{ background: "transparent", border: "1px solid #2a2f3a", color: "#9aa2ac", borderRadius: 8, padding: "8px 14px", cursor: "pointer", fontSize: 13 }}>
-            Skip to a different note
-          </button>
-        </div>
-      )}
+      <div style={{ textAlign: "center", marginBottom: 10 }}>
+        <button onClick={newNote} style={{ background: "transparent", border: "1px solid #2a2f3a", color: "#9aa2ac", borderRadius: 8, padding: "8px 14px", cursor: "pointer", fontSize: 13 }}>
+          Skip to a different note
+        </button>
+      </div>
 
-      {tunedCount < 6 && (
+      {tunedCount < guitarStrings.length && (
         <div style={{ textAlign: "center" }}>
           <button onClick={onGoTune} style={{ background: "transparent", border: "none", color: "#7a8290", fontSize: 12, cursor: "pointer", textDecoration: "underline" }}>
             Tune remaining strings for better string detection
