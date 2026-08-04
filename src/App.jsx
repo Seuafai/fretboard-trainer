@@ -3,6 +3,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const CHROMATIC = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
 // display order top -> bottom mirrors standard tab notation (high e on top)
+// openFreq/open here are the STANDARD-tuning reference values — alternate tunings
+// derive their own open note + frequency from these via tunedStrings() below.
 const STRINGS = [
   { id: "e1", label: "e", open: "E", openFreq: 329.63, thickness: 1.4 },
   { id: "B", label: "B", open: "B", openFreq: 246.94, thickness: 1.7 },
@@ -11,6 +13,39 @@ const STRINGS = [
   { id: "A", label: "A", open: "A", openFreq: 110.0, thickness: 3.2 },
   { id: "e2", label: "E", open: "E", openFreq: 82.41, thickness: 3.8 },
 ];
+
+// each `notes` array matches STRINGS order (high e, B, G, D, A, low E)
+const TUNING_PRESETS = [
+  { id: "standard", label: "Standard", notes: ["E", "B", "G", "D", "A", "E"] },
+  { id: "dropD", label: "Drop D", notes: ["E", "B", "G", "D", "A", "D"] },
+  { id: "halfStepDown", label: "Eb Standard (half step down)", notes: ["D#", "A#", "F#", "C#", "G#", "D#"] },
+  { id: "fullStepDown", label: "D Standard (full step down)", notes: ["D", "A", "F", "C", "G", "D"] },
+  { id: "dropC", label: "Drop C", notes: ["D", "A", "F", "C", "G", "C"] },
+  { id: "openG", label: "Open G", notes: ["D", "B", "G", "D", "G", "D"] },
+  { id: "openD", label: "Open D", notes: ["D", "A", "F#", "D", "A", "D"] },
+  { id: "openE", label: "Open E", notes: ["E", "B", "G#", "E", "B", "E"] },
+  { id: "dadgad", label: "DADGAD", notes: ["D", "A", "G", "D", "A", "D"] },
+];
+
+// shifts a standard-tuning reference frequency to a different note, picking the
+// nearest direction around the chromatic circle (correct for all alt-tuning shifts, which are small)
+function shiftFreq(standardFreq, standardLetter, targetLetter) {
+  const standardIdx = CHROMATIC.indexOf(standardLetter);
+  const targetIdx = CHROMATIC.indexOf(targetLetter);
+  let shift = (((targetIdx - standardIdx) % 12) + 12) % 12;
+  if (shift > 6) shift -= 12;
+  return standardFreq * Math.pow(2, shift / 12);
+}
+
+// combines the fixed per-string metadata (id/label/thickness) with a tuning preset's
+// open notes, producing the array used everywhere else in the app for note/frequency math
+function tunedStrings(presetNotes) {
+  return STRINGS.map((s, i) => ({
+    ...s,
+    open: presetNotes[i],
+    openFreq: shiftFreq(s.openFreq, s.open, presetNotes[i]),
+  }));
+}
 
 function noteAt(openLetter, fret) {
   const start = CHROMATIC.indexOf(openLetter);
@@ -29,10 +64,10 @@ function freqToNote(freq) {
 function centsBetween(freq, target) {
   return 1200 * Math.log2(freq / target);
 }
-function getOpenFreq(stringId, tuning) {
+function getOpenFreq(stringId, tuning, guitarStrings) {
   const t = tuning && tuning[stringId];
   if (t && t.freq) return t.freq;
-  return STRINGS.find((s) => s.id === stringId).openFreq;
+  return guitarStrings.find((s) => s.id === stringId).openFreq;
 }
 function timeAgo(ts) {
   if (!ts) return null;
@@ -266,8 +301,8 @@ function Chip({ active, onClick, children }) {
     </button>
   );
 }
-function TuneBanner({ tuning, onGoTune }) {
-  const timestamps = STRINGS.map((s) => tuning && tuning[s.id] && tuning[s.id].tunedAt).filter(Boolean);
+function TuneBanner({ tuning, onGoTune, guitarStrings }) {
+  const timestamps = guitarStrings.map((s) => tuning && tuning[s.id] && tuning[s.id].tunedAt).filter(Boolean);
   const newest = timestamps.length ? Math.max(...timestamps) : null;
   const staleMs = 24 * 60 * 60 * 1000;
   if (newest && Date.now() - newest < staleMs) return null;
@@ -301,14 +336,14 @@ function fretFraction(n) {
   return 1 - 1 / Math.pow(2, n / 12);
 }
 
-function FretboardSVG({ maxFret, activeStrings, markers, pulse }) {
+function FretboardSVG({ maxFret, activeStrings, markers, pulse, guitarStrings = STRINGS }) {
   const boardLeft = 46;
   const totalWidth = 54 * maxFret;
   const boardWidth = boardLeft + totalWidth + 26;
   const rowHeight = 34;
   const boardTop = 18;
-  const boardHeight = rowHeight * (STRINGS.length - 1) + 28;
-  const inlayFrets = [3, 5, 7, 9, 15, 17, 19, 21];
+  const boardHeight = rowHeight * (guitarStrings.length - 1) + 28;
+  const inlayFrets = [3, 5, 7, 9, 12, 15, 17, 19, 21, 24];
   const scale = fretFraction(maxFret) || 1;
 
   const fretX = (n) => boardLeft + (fretFraction(n) / scale) * totalWidth;
@@ -360,7 +395,7 @@ function FretboardSVG({ maxFret, activeStrings, markers, pulse }) {
           .map((f) => {
             const cx = cellMidX(f);
             const cy = boardTop + boardHeight / 2;
-            const dots = f === 12 ? [cy - 22, cy + 22] : [cy];
+            const dots = f === 12 || f === 24 ? [cy - 22, cy + 22] : [cy];
             return (
               <g key={f}>
                 {dots.map((dy, i) => (
@@ -386,7 +421,7 @@ function FretboardSVG({ maxFret, activeStrings, markers, pulse }) {
           </text>
         ))}
 
-        {STRINGS.map((s, idx) => {
+        {guitarStrings.map((s, idx) => {
           const y = boardTop + 14 + idx * rowHeight;
           const dimmed = !activeStrings.includes(s.id);
           return (
@@ -410,7 +445,7 @@ function FretboardSVG({ maxFret, activeStrings, markers, pulse }) {
         })}
 
         {markers.map((m, i) => {
-          const idx = STRINGS.findIndex((s) => s.id === m.stringId);
+          const idx = guitarStrings.findIndex((s) => s.id === m.stringId);
           const y = boardTop + 14 + idx * rowHeight;
           const x = cellMidX(m.fret);
           const isPulse = pulse && pulse.stringId === m.stringId && pulse.fret === m.fret;
@@ -468,7 +503,8 @@ function TunerGauge({ cents, active }) {
   );
 }
 
-function TunerPage({ mic, tuning, onUpdateTuning }) {
+
+function TunerPage({ mic, tuning, onUpdateTuning, guitarStrings }) {
   const [reading, setReading] = useState(null);
   const [detectedString, setDetectedString] = useState(null);
   const [lockProgress, setLockProgress] = useState(0);
@@ -494,7 +530,7 @@ function TunerPage({ mic, tuning, onUpdateTuning }) {
       // find nearest string by target frequency (within ~4 semitones)
       let best = null,
         bestCents = Infinity;
-      STRINGS.forEach((str) => {
+      guitarStrings.forEach((str) => {
         const c = centsBetween(s.freq, str.openFreq);
         if (Math.abs(c) < Math.abs(bestCents)) {
           bestCents = c;
@@ -538,14 +574,14 @@ function TunerPage({ mic, tuning, onUpdateTuning }) {
     }, 90);
     return () => clearInterval(intervalRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mic.status]);
+  }, [mic.status, guitarStrings]);
 
-  const tunedCount = STRINGS.filter((s) => tuning && tuning[s.id]).length;
+  const tunedCount = guitarStrings.filter((s) => tuning && tuning[s.id]).length;
 
   return (
     <div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 20 }}>
-        <StatCard label="Strings tuned" value={`${tunedCount} / 6`} />
+        <StatCard label="Strings tuned" value={`${tunedCount} / ${guitarStrings.length}`} />
         <StatCard label="Detecting" value={detectedString ? STRINGS.find((s) => s.id === detectedString).label : "–"} />
         <StatCard label="Status" value={mic.status === "active" ? "listening" : mic.status} />
       </div>
@@ -560,34 +596,18 @@ function TunerPage({ mic, tuning, onUpdateTuning }) {
         </div>
       )}
 
-      <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}>
-        <TunerGauge cents={reading ? reading.cents : null} active={!!reading} />
-      </div>
-      <div style={{ textAlign: "center", marginBottom: 22, minHeight: 20 }}>
-        {reading ? (
-          <span className="ft-mono" style={{ fontSize: 13, color: "#9aa2ac" }}>
-            {reading.cents > 0 ? "+" : ""}
-            {Math.round(reading.cents)}¢ {Math.abs(reading.cents) < 4 ? "· holding…" : ""}
-          </span>
-        ) : (
-          <span style={{ fontSize: 13, color: "#5a6270" }}>{mic.status === "active" ? "waiting for a string…" : ""}</span>
-        )}
-        {mic.status === "active" && (
-          <div className="ft-mono" style={{ fontSize: 11, color: "#5a6270", marginTop: 6 }}>
-            debug — freq: {debug && debug.freq ? `${debug.freq.toFixed(1)}Hz` : "none"} · clarity: {debug ? debug.clarity.toFixed(2) : "–"} · volume: {debug ? debug.rms.toFixed(4) : "–"} · confident: {debug ? String(debug.confident) : "–"}
-          </div>
-        )}
-      </div>
+      {(() => {
+        const leftIds = ["D", "A", "e2"]; // top-to-bottom: D, A, low E — bass side, low E nearest the nut
+        const rightIds = ["e1", "B", "G"]; // top-to-bottom: high e, B, G — treble side, G nearest the nut
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 8 }}>
-        {STRINGS.map((s) => {
-          const data = tuning && tuning[s.id];
-          const isCurrent = detectedString === s.id;
+        const StringCard = ({ id }) => {
+          const s = STRINGS.find((x) => x.id === id);
+          const data = tuning && tuning[id];
+          const isCurrent = detectedString === id;
           const isLocking = isCurrent && lockProgress > 0;
-          const isJustLocked = justLocked === s.id;
+          const isJustLocked = justLocked === id;
           return (
             <div
-              key={s.id}
               style={{
                 position: "relative",
                 textAlign: "center",
@@ -609,8 +629,44 @@ function TunerPage({ mic, tuning, onUpdateTuning }) {
               </div>
             </div>
           );
-        })}
-      </div>
+        };
+
+        return (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 18, marginBottom: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, width: 84 }}>
+              {leftIds.map((id) => (
+                <StringCard key={id} id={id} />
+              ))}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+              <TunerGauge cents={reading ? reading.cents : null} active={!!reading} />
+              <div style={{ textAlign: "center", minHeight: 20 }}>
+                {reading ? (
+                  <span className="ft-mono" style={{ fontSize: 13, color: "#9aa2ac" }}>
+                    {reading.cents > 0 ? "+" : ""}
+                    {Math.round(reading.cents)}¢ {Math.abs(reading.cents) < 4 ? "· holding…" : ""}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 13, color: "#5a6270" }}>{mic.status === "active" ? "waiting for a string…" : ""}</span>
+                )}
+                {mic.status === "active" && (
+                  <div className="ft-mono" style={{ fontSize: 11, color: "#5a6270", marginTop: 6 }}>
+                    debug — freq: {debug && debug.freq ? `${debug.freq.toFixed(1)}Hz` : "none"} · clarity: {debug ? debug.clarity.toFixed(2) : "–"} · volume: {debug ? debug.rms.toFixed(4) : "–"} · confident: {debug ? String(debug.confident) : "–"}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, width: 84 }}>
+              {rightIds.map((id) => (
+                <StringCard key={id} id={id} />
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       <p style={{ fontSize: 12, color: "#5a6270", marginTop: 14, textAlign: "center" }}>
         Play each string and hold it steady — it locks in automatically once it's in tune. You can leave any time; untuned strings just fall back to standard pitch.
       </p>
@@ -620,7 +676,7 @@ function TunerPage({ mic, tuning, onUpdateTuning }) {
 
 // ---------- Identify mode ----------
 
-function IdentifyMode({ maxFret, activeStrings }) {
+function IdentifyMode({ maxFret, activeStrings, guitarStrings }) {
   const [prompt, setPrompt] = useState(null);
   const [feedback, setFeedback] = useState(null);
   const [streak, setStreak] = useState(0);
@@ -649,14 +705,14 @@ function IdentifyMode({ maxFret, activeStrings }) {
   }, []);
 
   const nextPrompt = useCallback(() => {
-    const pool = activeStrings.length ? activeStrings : STRINGS.map((s) => s.id);
+    const pool = activeStrings.length ? activeStrings : guitarStrings.map((s) => s.id);
     const stringId = pool[Math.floor(Math.random() * pool.length)];
-    const stringDef = STRINGS.find((s) => s.id === stringId);
+    const stringDef = guitarStrings.find((s) => s.id === stringId);
     const fret = Math.floor(Math.random() * (maxFret + 1));
     const note = noteAt(stringDef.open, fret);
     setPrompt({ stringId, fret, note });
     setFeedback(null);
-  }, [activeStrings, maxFret]);
+  }, [activeStrings, maxFret, guitarStrings]);
 
   useEffect(() => {
     nextPrompt();
@@ -667,7 +723,7 @@ function IdentifyMode({ maxFret, activeStrings }) {
   useEffect(() => {
     if (prompt && (!activeStrings.includes(prompt.stringId) || prompt.fret > maxFret)) nextPrompt();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeStrings, maxFret]);
+  }, [activeStrings, maxFret, guitarStrings]);
 
   function handleAnswer(note) {
     if (feedback || !prompt) return;
@@ -704,7 +760,7 @@ function IdentifyMode({ maxFret, activeStrings }) {
         <StatCard label="Answered" value={totalCount} />
       </div>
       <div style={{ marginBottom: 22 }}>
-        <FretboardSVG maxFret={maxFret} activeStrings={activeStrings} markers={markers} pulse={null} />
+        <FretboardSVG maxFret={maxFret} activeStrings={activeStrings} markers={markers} pulse={null} guitarStrings={guitarStrings} />
       </div>
       <div style={{ textAlign: "center", marginBottom: 16, minHeight: 26 }}>
         {feedback ? (
@@ -749,11 +805,11 @@ function IdentifyMode({ maxFret, activeStrings }) {
 
 // ---------- Find It mode ----------
 
-function computeGroups(note, maxFret, activeStrings, tuning) {
+function computeGroups(note, maxFret, activeStrings, tuning, guitarStrings) {
   const positions = [];
-  STRINGS.forEach((s) => {
+  guitarStrings.forEach((s) => {
     if (!activeStrings.includes(s.id)) return;
-    const openFreq = getOpenFreq(s.id, tuning);
+    const openFreq = getOpenFreq(s.id, tuning, guitarStrings);
     const openIdx = CHROMATIC.indexOf(s.open);
     const targetIdx = CHROMATIC.indexOf(note);
     const fret = (targetIdx - openIdx + 12) % 12;
@@ -770,18 +826,18 @@ function computeGroups(note, maxFret, activeStrings, tuning) {
   return groups;
 }
 
-function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune }) {
+function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune, guitarStrings }) {
   const [note, setNote] = useState(() => CHROMATIC[Math.floor(Math.random() * 12)]);
-  const [groups, setGroups] = useState(() => computeGroups(note, maxFret, activeStrings, tuning));
+  const [groups, setGroups] = useState(() => computeGroups(note, maxFret, activeStrings, tuning, guitarStrings));
   const [reading, setReading] = useState(null);
   const [pulse, setPulse] = useState(null);
   const intervalRef = useRef(null);
   const lastMatchRef = useRef(0);
 
   useEffect(() => {
-    setGroups(computeGroups(note, maxFret, activeStrings, tuning));
+    setGroups(computeGroups(note, maxFret, activeStrings, tuning, guitarStrings));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note, maxFret, activeStrings]);
+  }, [note, maxFret, activeStrings, guitarStrings]);
 
   useEffect(() => {
     if (mic.status !== "active") return;
@@ -839,13 +895,12 @@ function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune }) {
   const totalPositions = groups.reduce((sum, g) => sum + g.positions.length, 0);
   const foundPositions = groups.reduce((sum, g) => sum + (g.credited ? g.credited.length : 0), 0);
   const allFound = totalPositions > 0 && foundPositions >= totalPositions;
-  const tunedCount = STRINGS.filter((s) => tuning && tuning[s.id]).length;
+  const tunedCount = guitarStrings.filter((s) => tuning && tuning[s.id]).length;
 
   const markers = groups.flatMap((g) =>
-    g.positions.map((p) => {
-      const isFound = (g.credited || []).includes(p.stringId);
-      return { stringId: p.stringId, fret: p.fret, filled: isFound, color: isFound ? "#7cb37a" : "#e0a95f", onClick: () => toggleManual(p.stringId, p.fret) };
-    })
+    g.positions
+      .filter((p) => (g.credited || []).includes(p.stringId))
+      .map((p) => ({ stringId: p.stringId, fret: p.fret, filled: true, color: "#7cb37a", onClick: () => toggleManual(p.stringId, p.fret) }))
   );
 
   function newNote() {
@@ -857,7 +912,7 @@ function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 20 }}>
         <StatCard label="Target note" value={note} />
         <StatCard label="Found" value={`${foundPositions} / ${totalPositions}`} />
-        <StatCard label="Strings tuned" value={`${tunedCount} / 6`} />
+        <StatCard label="Strings tuned" value={`${tunedCount} / ${guitarStrings.length}`} />
       </div>
 
       {mic.status !== "active" && (
@@ -871,7 +926,7 @@ function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune }) {
       )}
 
       <div style={{ marginBottom: 14 }}>
-        <FretboardSVG maxFret={maxFret} activeStrings={activeStrings} markers={markers} pulse={pulse} />
+        <FretboardSVG maxFret={maxFret} activeStrings={activeStrings} markers={markers} pulse={pulse} guitarStrings={guitarStrings} />
       </div>
 
       <div style={{ textAlign: "center", marginBottom: 18, minHeight: 40 }}>
@@ -915,9 +970,13 @@ function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune }) {
 export default function FretboardTrainer() {
   const [page, setPage] = useState("tuner");
   const [maxFret, setMaxFret] = useState(12);
+  const [tuningPresetId, setTuningPresetId] = useState("standard");
   const [activeStrings, setActiveStrings] = useState(STRINGS.map((s) => s.id));
-  const [tuning, setTuning] = useState(null); // null = loading
+  const [tuning, setTuning] = useState(null); // null = loading; holds mic-CALIBRATED frequencies (separate from the tuning preset above)
   const mic = useMic();
+
+  const tuningPreset = TUNING_PRESETS.find((t) => t.id === tuningPresetId) || TUNING_PRESETS[0];
+  const guitarStrings = tunedStrings(tuningPreset.notes);
 
   useEffect(() => {
     let cancelled = false;
@@ -938,6 +997,14 @@ export default function FretboardTrainer() {
     if (page === "identify" && mic.status === "active") mic.stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
+
+  const prevTuningPresetRef = useRef(tuningPresetId);
+  useEffect(() => {
+    if (prevTuningPresetRef.current !== tuningPresetId) {
+      prevTuningPresetRef.current = tuningPresetId;
+      setTuning({}); // old calibration was measured for a different tuning — no longer valid
+    }
+  }, [tuningPresetId]);
 
   const updateTuning = useCallback((stringId, data) => {
     setTuning((prev) => {
@@ -991,15 +1058,15 @@ export default function FretboardTrainer() {
           </Chip>
         </div>
 
-        {page !== "tuner" && <TuneBanner tuning={tuning} onGoTune={() => setPage("tuner")} />}
+        {page !== "tuner" && <TuneBanner tuning={tuning} onGoTune={() => setPage("tuner")} guitarStrings={guitarStrings} />}
 
         {tuning === null ? (
           <div style={{ textAlign: "center", color: "#5a6270", padding: 30 }}>loading…</div>
         ) : (
           <>
-            {page === "tuner" && <TunerPage mic={mic} tuning={tuning} onUpdateTuning={updateTuning} />}
-            {page === "identify" && <IdentifyMode maxFret={maxFret} activeStrings={activeStrings} />}
-            {page === "find" && <FindMode mic={mic} maxFret={maxFret} activeStrings={activeStrings} tuning={tuning} onGoTune={() => setPage("tuner")} />}
+            {page === "tuner" && <TunerPage mic={mic} tuning={tuning} onUpdateTuning={updateTuning} guitarStrings={guitarStrings} />}
+            {page === "identify" && <IdentifyMode maxFret={maxFret} activeStrings={activeStrings} guitarStrings={guitarStrings} />}
+            {page === "find" && <FindMode mic={mic} maxFret={maxFret} activeStrings={activeStrings} tuning={tuning} onGoTune={() => setPage("tuner")} guitarStrings={guitarStrings} />}
           </>
         )}
 
@@ -1010,10 +1077,34 @@ export default function FretboardTrainer() {
             </div>
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Fret range</div>
-              <div style={{ display: "flex", gap: 8 }}>
-                {[5, 12, 15].map((n) => (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                {[5, 12, 15, 22, 24].map((n) => (
                   <Chip key={n} active={maxFret === n} onClick={() => setMaxFret(n)}>
                     0–{n}
+                  </Chip>
+                ))}
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#9aa2ac" }}>
+                  custom:
+                  <input
+                    type="number"
+                    min={3}
+                    max={30}
+                    value={maxFret}
+                    onChange={(e) => {
+                      const n = parseInt(e.target.value, 10);
+                      if (!isNaN(n)) setMaxFret(Math.max(3, Math.min(30, n)));
+                    }}
+                    style={{ width: 52, background: "#12151a", border: "1px solid #2a2f3a", borderRadius: 6, color: "#f3ead9", padding: "5px 6px", fontSize: 13 }}
+                  />
+                </label>
+              </div>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Tuning</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {TUNING_PRESETS.map((t) => (
+                  <Chip key={t.id} active={tuningPresetId === t.id} onClick={() => setTuningPresetId(t.id)}>
+                    {t.label}
                   </Chip>
                 ))}
               </div>
@@ -1021,7 +1112,7 @@ export default function FretboardTrainer() {
             <div>
               <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Strings</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {STRINGS.map((s) => (
+                {guitarStrings.map((s) => (
                   <Chip key={s.id} active={activeStrings.includes(s.id)} onClick={() => toggleString(s.id)}>
                     {s.label} string
                   </Chip>
