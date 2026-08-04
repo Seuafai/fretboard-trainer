@@ -456,36 +456,36 @@ function TunerGauge({ cents, active }) {
   const clamped = Math.max(-50, Math.min(50, cents ?? 0));
   const angle = (clamped / 50) * 60; // -60deg..60deg
   const color = !active ? "#4a5160" : Math.abs(clamped) < 5 ? "#7cb37a" : Math.abs(clamped) < 20 ? "#e0a95f" : "#d9694e";
-  const cx = 140,
-    cy = 130,
-    r = 100;
+  const cx = 210,
+    cy = 195,
+    r = 150;
   const ticks = [-50, -25, 0, 25, 50];
   return (
-    <svg width={280} height={150} viewBox="0 0 280 150">
-      <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`} stroke="#2a2f3a" strokeWidth={3} fill="none" />
+    <svg width={420} height={225} viewBox="0 0 420 225" style={{ maxWidth: "100%", height: "auto" }}>
+      <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`} stroke="#2a2f3a" strokeWidth={4} fill="none" />
       {ticks.map((t) => {
         const a = (t / 50) * 60 * (Math.PI / 180) - Math.PI / 2;
-        const x1 = cx + Math.cos(a) * (r - 10);
-        const y1 = cy + Math.sin(a) * (r - 10);
+        const x1 = cx + Math.cos(a) * (r - 15);
+        const y1 = cy + Math.sin(a) * (r - 15);
         const x2 = cx + Math.cos(a) * r;
         const y2 = cy + Math.sin(a) * r;
-        return <line key={t} x1={x1} y1={y1} x2={x2} y2={y2} stroke={t === 0 ? "#e0a95f" : "#5a6270"} strokeWidth={t === 0 ? 3 : 2} />;
+        return <line key={t} x1={x1} y1={y1} x2={x2} y2={y2} stroke={t === 0 ? "#e0a95f" : "#5a6270"} strokeWidth={t === 0 ? 4 : 3} />;
       })}
       <line
         x1={cx}
         y1={cy}
-        x2={cx + Math.cos((angle * Math.PI) / 180 - Math.PI / 2) * (r - 20)}
-        y2={cy + Math.sin((angle * Math.PI) / 180 - Math.PI / 2) * (r - 20)}
+        x2={cx + Math.cos((angle * Math.PI) / 180 - Math.PI / 2) * (r - 30)}
+        y2={cy + Math.sin((angle * Math.PI) / 180 - Math.PI / 2) * (r - 30)}
         stroke={color}
-        strokeWidth={4}
+        strokeWidth={6}
         strokeLinecap="round"
         style={{ transition: "all 0.12s ease" }}
       />
-      <circle cx={cx} cy={cy} r={6} fill={color} />
-      <text x={cx - r + 2} y={cy + 20} fontSize={10} fill="#7a8290" className="ft-mono">
+      <circle cx={cx} cy={cy} r={9} fill={color} />
+      <text x={cx - r + 4} y={cy + 30} fontSize={15} fill="#7a8290" className="ft-mono">
         flat
       </text>
-      <text x={cx + r - 20} y={cy + 20} fontSize={10} fill="#7a8290" className="ft-mono">
+      <text x={cx + r - 32} y={cy + 30} fontSize={15} fill="#7a8290" className="ft-mono">
         sharp
       </text>
     </svg>
@@ -498,7 +498,6 @@ function TunerPage({ mic, tuning, onUpdateTuning, guitarStrings }) {
   const [detectedString, setDetectedString] = useState(null);
   const [lockProgress, setLockProgress] = useState(0);
   const [justLocked, setJustLocked] = useState(null);
-  const [debug, setDebug] = useState(null);
   const stableStartRef = useRef(null);
   const captureBufRef = useRef([]);
   const intervalRef = useRef(null);
@@ -508,7 +507,6 @@ function TunerPage({ mic, tuning, onUpdateTuning, guitarStrings }) {
     intervalRef.current = setInterval(() => {
       const s = mic.sample();
       if (!s) return;
-      setDebug({ freq: s.freq, clarity: s.clarity, rms: s.rms, confident: s.confident });
       if (!s.freq) {
         setReading(null);
         setDetectedString(null);
@@ -630,11 +628,6 @@ function TunerPage({ mic, tuning, onUpdateTuning, guitarStrings }) {
                 </span>
               ) : (
                 <span style={{ fontSize: 13, color: "#5a6270" }}>{mic.status === "active" ? "waiting for a string…" : ""}</span>
-              )}
-              {mic.status === "active" && (
-                <div className="ft-mono" style={{ fontSize: 11, color: "#5a6270", marginTop: 6 }}>
-                  debug — freq: {debug && debug.freq ? `${debug.freq.toFixed(1)}Hz` : "none"} · clarity: {debug ? debug.clarity.toFixed(2) : "–"} · volume: {debug ? debug.rms.toFixed(4) : "–"} · confident: {debug ? String(debug.confident) : "–"}
-                </div>
               )}
             </div>
 
