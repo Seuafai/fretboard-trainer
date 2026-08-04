@@ -846,10 +846,10 @@ function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune, guitarStrings
   const lastWrongRef = useRef(0);
   const flashTimeoutRef = useRef(null);
 
-  const triggerFlash = useCallback((stringId, fret, color) => {
+  const triggerFlash = useCallback((stringId, fret, color, duration) => {
     setFlash({ stringId, fret, color });
     clearTimeout(flashTimeoutRef.current);
-    flashTimeoutRef.current = setTimeout(() => setFlash(null), 650);
+    flashTimeoutRef.current = setTimeout(() => setFlash(null), duration);
   }, []);
 
   useEffect(() => {
@@ -870,7 +870,7 @@ function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune, guitarStrings
         if (now - lastWrongRef.current < 500) return;
         lastWrongRef.current = now;
         const pos = nearestPosition(s.freq, guitarStrings, activeStrings, maxFret);
-        if (pos) triggerFlash(pos.stringId, pos.fret, "#d9694e");
+        if (pos) triggerFlash(pos.stringId, pos.fret, "#d9694e", 650);
         return;
       }
       if (now - lastMatchRef.current < 500) return;
@@ -894,7 +894,7 @@ function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune, guitarStrings
           });
         }
         lastMatchRef.current = now;
-        triggerFlash(chosen.stringId, chosen.fret, "#7cb37a");
+        triggerFlash(chosen.stringId, chosen.fret, "#7cb37a", 1800);
         const next = [...prev];
         next[groupIdx] = { ...group, credited: [...(group.credited || []), chosen.stringId] };
         return next;
@@ -907,32 +907,14 @@ function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune, guitarStrings
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mic.status, note, tuning, guitarStrings, activeStrings, maxFret]);
 
-  function toggleManual(stringId, fret) {
-    setGroups((prev) => {
-      const groupIdx = prev.findIndex((g) => g.positions.some((p) => p.stringId === stringId && p.fret === fret));
-      if (groupIdx === -1) return prev;
-      const group = prev[groupIdx];
-      const credited = group.credited || [];
-      const nextCredited = credited.includes(stringId) ? credited.filter((id) => id !== stringId) : [...credited, stringId];
-      const next = [...prev];
-      next[groupIdx] = { ...group, credited: nextCredited };
-      return next;
-    });
-  }
-
   const totalPositions = groups.reduce((sum, g) => sum + g.positions.length, 0);
   const foundPositions = groups.reduce((sum, g) => sum + (g.credited ? g.credited.length : 0), 0);
   const allFound = totalPositions > 0 && foundPositions >= totalPositions;
   const tunedCount = guitarStrings.filter((s) => tuning && tuning[s.id]).length;
 
-  const markers = groups.flatMap((g) =>
-    g.positions
-      .filter((p) => (g.credited || []).includes(p.stringId))
-      .map((p) => ({ stringId: p.stringId, fret: p.fret, filled: true, color: "#7cb37a", onClick: () => toggleManual(p.stringId, p.fret) }))
-  );
-  if (flash && !markers.some((m) => m.stringId === flash.stringId && m.fret === flash.fret)) {
-    markers.push({ stringId: flash.stringId, fret: flash.fret, filled: true, color: flash.color });
-  }
+  // the fretboard itself only ever shows the temporary flash now (green = correct, red = wrong);
+  // found/total progress is still tracked in `groups`/credited, just not drawn as a lingering marker.
+  const markers = flash ? [{ stringId: flash.stringId, fret: flash.fret, filled: true, color: flash.color }] : [];
 
   function newNote() {
     setNote(CHROMATIC[Math.floor(Math.random() * 12)]);
@@ -1122,11 +1104,11 @@ export default function FretboardTrainer() {
                     <input
                       type="number"
                       min={3}
-                      max={30}
+                      max={24}
                       value={maxFret}
                       onChange={(e) => {
                         const n = parseInt(e.target.value, 10);
-                        if (!isNaN(n)) setMaxFret(Math.max(3, Math.min(30, n)));
+                        if (!isNaN(n)) setMaxFret(Math.max(3, Math.min(24, n)));
                       }}
                       style={{ width: 52, background: "#12151a", border: "1px solid #2a2f3a", borderRadius: 6, color: "#f3ead9", padding: "5px 6px", fontSize: 13 }}
                     />
