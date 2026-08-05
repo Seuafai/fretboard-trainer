@@ -27,6 +27,22 @@ const TUNING_PRESETS = [
   { id: "dadgad", label: "DADGAD", notes: ["D", "A", "G", "D", "A", "D"] },
 ];
 
+// semitone intervals from the root, ascending within one octave (root is added again at the top)
+const SCALE_PATTERNS = [
+  { id: "major", label: "Major (Ionian)", intervals: [0, 2, 4, 5, 7, 9, 11] },
+  { id: "dorian", label: "Dorian", intervals: [0, 2, 3, 5, 7, 9, 10] },
+  { id: "phrygian", label: "Phrygian", intervals: [0, 1, 3, 5, 7, 8, 10] },
+  { id: "lydian", label: "Lydian", intervals: [0, 2, 4, 6, 7, 9, 11] },
+  { id: "mixolydian", label: "Mixolydian", intervals: [0, 2, 4, 5, 7, 9, 10] },
+  { id: "minor", label: "Natural Minor (Aeolian)", intervals: [0, 2, 3, 5, 7, 8, 10] },
+  { id: "locrian", label: "Locrian", intervals: [0, 1, 3, 5, 6, 8, 10] },
+  { id: "harmonicMinor", label: "Harmonic Minor", intervals: [0, 2, 3, 5, 7, 8, 11] },
+  { id: "melodicMinor", label: "Melodic Minor", intervals: [0, 2, 3, 5, 7, 9, 11] },
+  { id: "majorPent", label: "Major Pentatonic", intervals: [0, 2, 4, 7, 9] },
+  { id: "minorPent", label: "Minor Pentatonic", intervals: [0, 3, 5, 7, 10] },
+  { id: "blues", label: "Blues", intervals: [0, 3, 5, 6, 7, 10] },
+];
+
 // shifts a standard-tuning reference frequency to a different note, picking the
 // nearest direction around the chromatic circle (correct for all alt-tuning shifts, which are small)
 function shiftFreq(standardFreq, standardLetter, targetLetter) {
@@ -441,7 +457,7 @@ function FretboardSVG({ maxFret, activeStrings, markers, pulse, guitarStrings = 
           return (
             <g key={i} onClick={m.onClick} style={{ cursor: m.onClick ? "pointer" : "default" }}>
               {isPulse && <circle cx={x} cy={y} r={18} fill="url(#markerglow2)" opacity={0.7} />}
-              <circle cx={x} cy={y} r={m.filled ? 10 : 9} fill={m.filled ? m.color : "transparent"} stroke={m.color} strokeWidth={m.filled ? 1.5 : 2} />
+              <circle cx={x} cy={y} r={m.big ? 12 : m.filled ? 10 : 9} fill={m.filled ? m.color : "transparent"} stroke={m.color} strokeWidth={m.filled ? 1.5 : 2} />
             </g>
           );
         })}
@@ -897,6 +913,232 @@ function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune, guitarStrings
   );
 }
 
+// ---------- Scales mode ----------
+
+function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuning }) {
+  const [rootIdx, setRootIdx] = useState(0); // index into CHROMATIC
+  const [scaleId, setScaleId] = useState("major");
+  const [stepIndex, setStepIndex] = useState(0);
+  const [reading, setReading] = useState(null);
+  const [flash, setFlash] = useState(null);
+  const [completedLaps, setCompletedLaps] = useState(0);
+  const [revealScale, setRevealScale] = useState(false);
+  const [positionIndex, setPositionIndex] = useState(0);
+  const intervalRef = useRef(null);
+  const lastMatchRef = useRef(0);
+  const lastWrongRef = useRef(0);
+  const flashTimeoutRef = useRef(null);
+  const lapTimeoutRef = useRef(null);
+
+  const scale = SCALE_PATTERNS.find((s) => s.id === scaleId) || SCALE_PATTERNS[0];
+  const sequence = [...scale.intervals.map((iv) => CHROMATIC[(rootIdx + iv) % 12]), CHROMATIC[rootIdx]]; // ends back on the root
+
+  const triggerFlash = useCallback((stringId, fret, color, duration) => {
+    setFlash({ stringId, fret, color });
+    clearTimeout(flashTimeoutRef.current);
+    flashTimeoutRef.current = setTimeout(() => setFlash(null), duration);
+  }, []);
+
+  function resetRun() {
+    setStepIndex(0);
+    setFlash(null);
+    clearTimeout(flashTimeoutRef.current);
+    clearTimeout(lapTimeoutRef.current);
+  }
+
+  useEffect(() => {
+    resetRun();
+    setPositionIndex(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootIdx, scaleId]);
+
+  useEffect(() => {
+    if (mic.status !== "active") return;
+    intervalRef.current = setInterval(() => {
+      const s = mic.sample();
+      if (!s || !s.freq) return;
+      const { name } = freqToNote(s.freq);
+      setReading({ name });
+      const now = Date.now();
+      const pos = nearestPosition(s.freq, guitarStrings, activeStrings, maxFret);
+      if (!pos) return;
+
+      const target = sequence[stepIndex];
+      if (name !== target) {
+        if (now - lastWrongRef.current < 500) return;
+        lastWrongRef.current = now;
+        triggerFlash(pos.stringId, pos.fret, "#d9694e", 650);
+        return;
+      }
+      if (now - lastMatchRef.current < 500) return;
+      lastMatchRef.current = now;
+      triggerFlash(pos.stringId, pos.fret, "#7cb37a", 1800);
+
+      setStepIndex((i) => {
+        const next = i + 1;
+        if (next >= sequence.length) {
+          setCompletedLaps((c) => c + 1);
+          lapTimeoutRef.current = setTimeout(() => setStepIndex(0), 1400);
+          return i; // hold on the final note briefly before looping back to the start
+        }
+        return next;
+      });
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, 110);
+    return () => {
+      clearInterval(intervalRef.current);
+      clearTimeout(flashTimeoutRef.current);
+      clearTimeout(lapTimeoutRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mic.status, stepIndex, sequence.join(","), guitarStrings, activeStrings, maxFret]);
+
+  const scaleNoteSet = new Set(sequence);
+  const rootNote = CHROMATIC[rootIdx];
+
+  // find every fret where the root falls on the lowest active string, each becomes a selectable "position"
+  const refString = [...guitarStrings].filter((s) => activeStrings.includes(s.id)).sort((a, b) => a.openFreq - b.openFreq)[0];
+  const rootFrets = [];
+  if (refString) {
+    for (let fret = 0; fret <= maxFret; fret++) {
+      if (noteAt(refString.open, fret) === rootNote) rootFrets.push(fret);
+    }
+  }
+  const positions = (rootFrets.length ? rootFrets : [0]).map((r) => ({
+    start: Math.max(0, r - 1),
+    end: Math.min(maxFret, r + 3),
+  }));
+  const activePosition = positions[Math.min(positionIndex, positions.length - 1)] || { start: 0, end: Math.min(maxFret, 4) };
+
+  const revealMarkers = revealScale
+    ? guitarStrings.flatMap((s) => {
+        if (!activeStrings.includes(s.id)) return [];
+        const out = [];
+        for (let fret = activePosition.start; fret <= activePosition.end; fret++) {
+          const n = noteAt(s.open, fret);
+          if (!scaleNoteSet.has(n)) continue;
+          const isRoot = n === rootNote;
+          out.push({ stringId: s.id, fret, filled: isRoot, big: isRoot, color: isRoot ? "#e0a95f" : "#e0a95f77" });
+        }
+        return out;
+      })
+    : [];
+  const markers = [...revealMarkers, ...(flash ? [{ stringId: flash.stringId, fret: flash.fret, filled: true, color: flash.color }] : [])];
+  const justCompleted = stepIndex >= sequence.length - 1 && completedLaps > 0 && Date.now() - lastMatchRef.current < 1400;
+  const tunedCount = guitarStrings.filter((s) => tuning && tuning[s.id]).length;
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 20 }}>
+        <StatCard label="Scale" value={`${CHROMATIC[rootIdx]} ${scale.label}`} />
+        <StatCard label="Step" value={`${Math.min(stepIndex + 1, sequence.length)} / ${sequence.length}`} />
+        <StatCard label="Laps completed" value={completedLaps} />
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Root note</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+          {CHROMATIC.map((n, i) => (
+            <Chip key={n} active={rootIdx === i} onClick={() => setRootIdx(i)}>
+              {n}
+            </Chip>
+          ))}
+        </div>
+        <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Scale</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+          {SCALE_PATTERNS.map((sc) => (
+            <Chip key={sc.id} active={scaleId === sc.id} onClick={() => setScaleId(sc.id)}>
+              {sc.label}
+            </Chip>
+          ))}
+        </div>
+        <Chip active={revealScale} onClick={() => setRevealScale((v) => !v)}>
+          {revealScale ? "Reveal on" : "Reveal scale positions"}
+        </Chip>
+        {revealScale && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Position</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {positions.map((p, i) => (
+                <Chip key={i} active={positionIndex === i} onClick={() => setPositionIndex(i)}>
+                  {i + 1} (fr {p.start}–{p.end})
+                </Chip>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {mic.status !== "active" && (
+        <div style={{ textAlign: "center", padding: "22px 16px", border: "1px dashed #2a2f3a", borderRadius: 10, marginBottom: 20 }}>
+          <p style={{ color: "#9aa2ac", fontSize: 14, marginBottom: 14 }}>Scales listens through your microphone as you play through the sequence.</p>
+          <button className="ft-primary-btn" onClick={() => mic.start()} disabled={mic.status === "requesting"}>
+            {mic.status === "requesting" ? "Requesting mic…" : "Enable microphone"}
+          </button>
+          {mic.status === "error" && <p style={{ color: "#e08a71", fontSize: 13, marginTop: 12 }}>{mic.error}</p>}
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+        {sequence.map((n, i) => {
+          const done = i < stepIndex;
+          const isCurrent = i === stepIndex;
+          return (
+            <div
+              key={i}
+              className={isCurrent ? "ft-title" : ""}
+              style={{
+                width: 34,
+                height: 34,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: "50%",
+                fontSize: isCurrent ? 16 : 14,
+                border: `1.5px solid ${isCurrent ? "#e0a95f" : done ? "#7cb37a" : "#2a2f3a"}`,
+                background: isCurrent ? "#e0a95f22" : done ? "#7cb37a22" : "transparent",
+                color: isCurrent ? "#f3ead9" : done ? "#8fbb7f" : "#5a6270",
+              }}
+            >
+              {n}
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ marginBottom: 14 }}>
+        <FretboardSVG maxFret={maxFret} activeStrings={activeStrings} markers={markers} pulse={flash} guitarStrings={guitarStrings} />
+      </div>
+
+      <div style={{ textAlign: "center", marginBottom: 18, minHeight: 40 }}>
+        {justCompleted ? (
+          <div className="ft-title" style={{ fontSize: 18, color: "#8fbb7f" }}>
+            Lap complete — starting over
+          </div>
+        ) : (
+          <div style={{ fontSize: 14, color: "#9aa2ac" }}>
+            Play <strong style={{ color: "#f3ead9" }}>{sequence[stepIndex]}</strong> next — anywhere on the neck.
+          </div>
+        )}
+      </div>
+
+      <div style={{ textAlign: "center", marginBottom: 10 }}>
+        <button onClick={resetRun} style={{ background: "transparent", border: "1px solid #2a2f3a", color: "#9aa2ac", borderRadius: 8, padding: "8px 14px", cursor: "pointer", fontSize: 13 }}>
+          Restart from the root
+        </button>
+      </div>
+
+      {tunedCount < guitarStrings.length && (
+        <div style={{ textAlign: "center" }}>
+          <button onClick={onGoTune} style={{ background: "transparent", border: "none", color: "#7a8290", fontSize: 12, cursor: "pointer", textDecoration: "underline" }}>
+            Tune remaining strings for better string detection
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------- root ----------
 
 export default function FretboardTrainer() {
@@ -976,9 +1218,10 @@ export default function FretboardTrainer() {
           {page === "tuner" && "Get in tune — it quietly teaches the app your guitar's voice at the same time."}
           {page === "identify" && "A brass marker lights up a fret. Name the note before it fades."}
           {page === "find" && "Play back the note the app calls out — everywhere it lives on the neck."}
+          {page === "scales" && "Pick a scale and play it in order — one note calls the next."}
         </p>
 
-        <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
           <Chip active={page === "tuner"} onClick={() => setPage("tuner")}>
             Tuner
           </Chip>
@@ -987,6 +1230,9 @@ export default function FretboardTrainer() {
           </Chip>
           <Chip active={page === "find"} onClick={() => setPage("find")}>
             Find It
+          </Chip>
+          <Chip active={page === "scales"} onClick={() => setPage("scales")}>
+            Scales
           </Chip>
         </div>
 
@@ -999,6 +1245,7 @@ export default function FretboardTrainer() {
             {page === "tuner" && <TunerPage mic={mic} tuning={tuning} onUpdateTuning={updateTuning} guitarStrings={guitarStrings} />}
             {page === "identify" && <IdentifyMode maxFret={maxFret} activeStrings={activeStrings} guitarStrings={guitarStrings} />}
             {page === "find" && <FindMode mic={mic} maxFret={maxFret} activeStrings={activeStrings} tuning={tuning} onGoTune={() => setPage("tuner")} guitarStrings={guitarStrings} />}
+            {page === "scales" && <ScalesMode mic={mic} maxFret={maxFret} activeStrings={activeStrings} guitarStrings={guitarStrings} tuning={tuning} onGoTune={() => setPage("tuner")} />}
           </>
         )}
 
