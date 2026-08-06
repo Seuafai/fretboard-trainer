@@ -466,6 +466,75 @@ function FretboardSVG({ maxFret, activeStrings, markers, pulse, guitarStrings = 
   );
 }
 
+// ---------- notation staff ----------
+
+const NATURAL_LETTERS = ["C", "D", "E", "F", "G", "A", "B"];
+
+// sharps are drawn on the same staff position as the natural below them, with a sharp sign
+function pitchClassToNatural(name) {
+  if (!name.includes("#")) return { letter: name, sharp: false };
+  return { letter: name[0], sharp: true };
+}
+// diatonic steps from the bottom staff line (E4) — each step is half a line-spacing vertically
+function noteNameToStepsFromE4(letter, octave) {
+  return octave * 7 + NATURAL_LETTERS.indexOf(letter) - (4 * 7 + 2);
+}
+function freqToStaffInfo(freq) {
+  const midi = Math.round(69 + 12 * Math.log2(freq / 440));
+  const displayMidi = midi + 12; // guitar notation is written one octave above concert pitch
+  const octave = Math.floor(displayMidi / 12) - 1;
+  const pcName = CHROMATIC[((displayMidi % 12) + 12) % 12];
+  const { letter, sharp } = pitchClassToNatural(pcName);
+  return { stepsFromE4: noteNameToStepsFromE4(letter, octave), sharp };
+}
+function pitchClassToStaffInfo(name, assumedOctave = 4) {
+  const { letter, sharp } = pitchClassToNatural(name);
+  return { stepsFromE4: noteNameToStepsFromE4(letter, assumedOctave), sharp };
+}
+
+function NotationStaff({ freq, pitchClass, color }) {
+  const info = freq ? freqToStaffInfo(freq) : pitchClassToStaffInfo(pitchClass);
+  const lineSpacing = 12;
+  const halfStep = lineSpacing / 2;
+  const bottomLineY = 96; // E4, the bottom staff line
+  const noteX = 90;
+  const noteY = bottomLineY - info.stepsFromE4 * halfStep;
+  const viewH = Math.max(180, Math.abs(noteY) + 60, noteY + 60);
+
+  const ledgerLines = [];
+  if (info.stepsFromE4 < 0) {
+    for (let s = -2; s >= info.stepsFromE4 - (info.stepsFromE4 % 2 === 0 ? 0 : 1); s -= 2) {
+      ledgerLines.push(bottomLineY - s * halfStep);
+    }
+  } else if (info.stepsFromE4 > 8) {
+    for (let s = 10; s <= info.stepsFromE4 + (info.stepsFromE4 % 2 === 0 ? 0 : 1); s += 2) {
+      ledgerLines.push(bottomLineY - s * halfStep);
+    }
+  }
+
+  return (
+    <div style={{ overflowX: "auto", background: "#100e0b", border: "1px solid #2a2f3a", borderRadius: 10, padding: "16px 6px", display: "flex", justifyContent: "center" }}>
+      <svg width={180} height={viewH} viewBox={`0 0 180 ${viewH}`} style={{ maxWidth: "100%", height: "auto" }}>
+        {[0, 1, 2, 3, 4].map((i) => (
+          <line key={i} x1={20} x2={160} y1={bottomLineY - i * lineSpacing} y2={bottomLineY - i * lineSpacing} stroke="#5a6270" strokeWidth={1.2} />
+        ))}
+        <text x={22} y={bottomLineY - lineSpacing * 1.2} fontSize={40} fill="#7a8290">
+          𝄞
+        </text>
+        {ledgerLines.map((y, i) => (
+          <line key={i} x1={noteX - 12} x2={noteX + 12} y1={y} y2={y} stroke="#7a8290" strokeWidth={1.2} />
+        ))}
+        {info.sharp && (
+          <text x={noteX - 22} y={noteY + 5} fontSize={15} fill={color || "#e0a95f"}>
+            ♯
+          </text>
+        )}
+        <ellipse cx={noteX} cy={noteY} rx={7} ry={5.5} fill={color || "#e0a95f"} transform={`rotate(-18 ${noteX} ${noteY})`} />
+      </svg>
+    </div>
+  );
+}
+
 // ---------- Tuner page ----------
 
 function TunerGauge({ cents, active }) {
@@ -796,21 +865,28 @@ function IdentifyMode({ maxFret, activeStrings, guitarStrings }) {
 
 // ---------- Find It mode ----------
 
-function nearestPosition(freq, guitarStrings, activeStrings, maxFret) {
-  let best = null,
-    bestCents = Infinity;
-  guitarStrings.forEach((s) => {
-    if (!activeStrings.includes(s.id)) return;
-    for (let fret = 0; fret <= maxFret; fret++) {
-      const f = freqAt(s.openFreq, fret);
-      const cents = Math.abs(1200 * Math.log2(freq / f));
-      if (cents < bestCents) {
-        bestCents = cents;
-        best = { stringId: s.id, fret };
+function nearestPosition(freq, guitarStrings, activeStrings, maxFret, preferredRange) {
+  const search = (fretMin, fretMax, tolerance) => {
+    let best = null,
+      bestCents = Infinity;
+    guitarStrings.forEach((s) => {
+      if (!activeStrings.includes(s.id)) return;
+      for (let fret = fretMin; fret <= fretMax; fret++) {
+        const f = freqAt(s.openFreq, fret);
+        const cents = Math.abs(1200 * Math.log2(freq / f));
+        if (cents < bestCents) {
+          bestCents = cents;
+          best = { stringId: s.id, fret };
+        }
       }
-    }
-  });
-  return best;
+    });
+    return bestCents <= tolerance ? best : null;
+  };
+  if (preferredRange) {
+    const inWindow = search(preferredRange.start, preferredRange.end, 35);
+    if (inWindow) return inWindow;
+  }
+  return search(0, maxFret, Infinity);
 }
 
 function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune, guitarStrings }) {
@@ -923,6 +999,7 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
   const [flash, setFlash] = useState(null);
   const [completedLaps, setCompletedLaps] = useState(0);
   const [revealScale, setRevealScale] = useState(false);
+  const [viewMode, setViewMode] = useState("fretboard"); // "fretboard" | "notation"
   const [positionIndex, setPositionIndex] = useState(0);
   const intervalRef = useRef(null);
   const lastMatchRef = useRef(0);
@@ -932,6 +1009,16 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
 
   const scale = SCALE_PATTERNS.find((s) => s.id === scaleId) || SCALE_PATTERNS[0];
   const sequence = [...scale.intervals.map((iv) => CHROMATIC[(rootIdx + iv) % 12]), CHROMATIC[rootIdx]]; // ends back on the root
+
+  // slide a ~5-fret window across the whole range, stepping by 3 frets so windows overlap —
+  // gives several playable positions even within a single 12-fret span, not just once per root recurrence
+  const positions = [];
+  for (let start = 0; start <= maxFret; start += 3) {
+    const end = Math.min(maxFret, start + 4);
+    positions.push({ start, end });
+    if (end >= maxFret) break;
+  }
+  const activePosition = positions[Math.min(positionIndex, positions.length - 1)] || { start: 0, end: Math.min(maxFret, 4) };
 
   const triggerFlash = useCallback((stringId, fret, color, duration) => {
     setFlash({ stringId, fret, color });
@@ -960,7 +1047,7 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
       const { name } = freqToNote(s.freq);
       setReading({ name });
       const now = Date.now();
-      const pos = nearestPosition(s.freq, guitarStrings, activeStrings, maxFret);
+      const pos = nearestPosition(s.freq, guitarStrings, activeStrings, maxFret, revealScale ? activePosition : null);
       if (!pos) return;
 
       const target = sequence[stepIndex];
@@ -991,20 +1078,10 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
       clearTimeout(lapTimeoutRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mic.status, stepIndex, sequence.join(","), guitarStrings, activeStrings, maxFret]);
+  }, [mic.status, stepIndex, sequence.join(","), guitarStrings, activeStrings, maxFret, revealScale, activePosition.start, activePosition.end]);
 
   const scaleNoteSet = new Set(sequence);
   const rootNote = CHROMATIC[rootIdx];
-
-  // slide a ~5-fret window across the whole range, stepping by 3 frets so windows overlap —
-  // gives several playable positions even within a single 12-fret span, not just once per root recurrence
-  const positions = [];
-  for (let start = 0; start <= maxFret; start += 3) {
-    const end = Math.min(maxFret, start + 4);
-    positions.push({ start, end });
-    if (end >= maxFret) break;
-  }
-  const activePosition = positions[Math.min(positionIndex, positions.length - 1)] || { start: 0, end: Math.min(maxFret, 4) };
 
   const revealMarkers = revealScale
     ? guitarStrings.flatMap((s) => {
@@ -1102,8 +1179,25 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
         })}
       </div>
 
+      <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 12 }}>
+        <Chip active={viewMode === "fretboard"} onClick={() => setViewMode("fretboard")}>
+          Fretboard
+        </Chip>
+        <Chip active={viewMode === "notation"} onClick={() => setViewMode("notation")}>
+          Notation
+        </Chip>
+      </div>
+
       <div style={{ marginBottom: 14 }}>
-        <FretboardSVG maxFret={maxFret} activeStrings={activeStrings} markers={markers} pulse={flash} guitarStrings={guitarStrings} />
+        {viewMode === "fretboard" ? (
+          <FretboardSVG maxFret={maxFret} activeStrings={activeStrings} markers={markers} pulse={flash} guitarStrings={guitarStrings} />
+        ) : (
+          <NotationStaff
+            freq={flash ? freqAt(guitarStrings.find((s) => s.id === flash.stringId).openFreq, flash.fret) : null}
+            pitchClass={sequence[stepIndex]}
+            color={flash ? flash.color : "#e0a95f"}
+          />
+        )}
       </div>
 
       <div style={{ textAlign: "center", marginBottom: 18, minHeight: 40 }}>
