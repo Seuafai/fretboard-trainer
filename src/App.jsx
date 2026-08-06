@@ -492,7 +492,7 @@ function ledgerYsFor(stepsFromE4, bottomLineY, halfStep) {
 
 // shows the whole scale laid out on the staff at once; notes already played this lap turn green,
 // the current target glows gold (and rings red briefly on a wrong note), the rest stay neutral
-function NotationStaff({ sequenceAbs, stepIndex, wrong }) {
+function NotationStaff({ sequenceAbs, foundNotes }) {
   const lineSpacing = 12;
   const halfStep = lineSpacing / 2;
   const bottomLineY = 96; // E4, the bottom staff line
@@ -504,7 +504,7 @@ function NotationStaff({ sequenceAbs, stepIndex, wrong }) {
     const pcName = CHROMATIC[((abs % 12) + 12) % 12];
     const { letter, sharp } = pitchClassToNatural(pcName);
     const stepsFromE4 = noteNameToStepsFromE4(letter, octave);
-    return { x: startX + i * stepX, y: bottomLineY - stepsFromE4 * halfStep, sharp, stepsFromE4 };
+    return { x: startX + i * stepX, y: bottomLineY - stepsFromE4 * halfStep, sharp, stepsFromE4, pcName };
   });
 
   const allY = notes.map((n) => n.y);
@@ -522,16 +522,14 @@ function NotationStaff({ sequenceAbs, stepIndex, wrong }) {
           𝄞
         </text>
         {notes.map((n, i) => {
-          const done = i < stepIndex;
-          const isCurrent = i === stepIndex;
-          const color = done ? "#7cb37a" : isCurrent ? "#e0a95f" : "#f3ead9";
+          const found = foundNotes.includes(n.pcName);
+          const color = found ? "#7cb37a" : "#f3ead9";
           const ledgerYs = ledgerYsFor(n.stepsFromE4, bottomLineY, halfStep);
           return (
             <g key={i}>
               {ledgerYs.map((y, li) => (
                 <line key={li} x1={n.x - 11} x2={n.x + 11} y1={y} y2={y} stroke="#7a8290" strokeWidth={1.2} />
               ))}
-              {isCurrent && <circle cx={n.x} cy={n.y} r={13} fill="none" stroke={wrong ? "#d9694e" : "#e0a95f"} strokeWidth={2} opacity={0.8} />}
               {n.sharp && (
                 <text x={n.x - 20} y={n.y + 5} fontSize={14} fill={color}>
                   ♯
@@ -1005,10 +1003,9 @@ function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune, guitarStrings
 function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuning }) {
   const [rootIdx, setRootIdx] = useState(0); // index into CHROMATIC
   const [scaleId, setScaleId] = useState("major");
-  const [stepIndex, setStepIndex] = useState(0);
   const [reading, setReading] = useState(null);
   const [flash, setFlash] = useState(null);
-  const [completedLaps, setCompletedLaps] = useState(0);
+  const [foundNotes, setFoundNotes] = useState([]); // pitch-class strings found this session, any order
   const [revealScale, setRevealScale] = useState(false);
   const [viewMode, setViewMode] = useState("fretboard"); // "fretboard" | "notation"
   const [positionIndex, setPositionIndex] = useState(0);
@@ -1016,20 +1013,33 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
   const lastMatchRef = useRef(0);
   const lastWrongRef = useRef(0);
   const flashTimeoutRef = useRef(null);
-  const lapTimeoutRef = useRef(null);
 
   const scale = SCALE_PATTERNS.find((s) => s.id === scaleId) || SCALE_PATTERNS[0];
   const sequenceAbs = [...scale.intervals, 12].map((iv) => rootIdx + iv); // ascending absolute semitone offsets, used for staff octave placement
   const sequence = sequenceAbs.map((abs) => CHROMATIC[((abs % 12) + 12) % 12]); // ends back on the root
+  const uniqueScaleNotes = [...new Set(sequence)];
 
-  // slide a ~5-fret window across the whole range, stepping by 3 frets so windows overlap —
-  // gives several playable positions even within a single 12-fret span, not just once per root recurrence
-  const positions = [];
-  for (let start = 0; start <= maxFret; start += 3) {
-    const end = Math.min(maxFret, start + 4);
-    positions.push({ start, end });
-    if (end >= maxFret) break;
+  // find each place the root note falls on the lowest active string, then offer 3 shape
+  // variants per occurrence — root near the bottom, middle, or top of a playable hand-span
+  const refString = [...guitarStrings].filter((s) => activeStrings.includes(s.id)).sort((a, b) => a.openFreq - b.openFreq)[0];
+  const rootNoteForPositions = CHROMATIC[rootIdx];
+  const rootFrets = [];
+  if (refString) {
+    for (let fret = 0; fret <= maxFret; fret++) {
+      if (noteAt(refString.open, fret) === rootNoteForPositions) rootFrets.push(fret);
+    }
   }
+  const positions = [];
+  rootFrets.forEach((r) => {
+    const variants = [
+      { start: r, end: Math.min(maxFret, r + 4), label: "root low" },
+      { start: Math.max(0, r - 2), end: Math.min(maxFret, r + 2), label: "root mid" },
+      { start: Math.max(0, r - 4), end: r, label: "root high" },
+    ];
+    variants.forEach((v) => {
+      if (v.end - v.start >= 3) positions.push(v); // skip degenerate windows too close to the neck's edge
+    });
+  });
   const activePosition = positions[Math.min(positionIndex, positions.length - 1)] || { start: 0, end: Math.min(maxFret, 4) };
 
   const triggerFlash = useCallback((stringId, fret, color, duration) => {
@@ -1039,10 +1049,9 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
   }, []);
 
   function resetRun() {
-    setStepIndex(0);
+    setFoundNotes([]);
     setFlash(null);
     clearTimeout(flashTimeoutRef.current);
-    clearTimeout(lapTimeoutRef.current);
   }
 
   useEffect(() => {
@@ -1062,8 +1071,7 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
       const pos = nearestPosition(s.freq, guitarStrings, activeStrings, maxFret, revealScale ? activePosition : null);
       if (!pos) return;
 
-      const target = sequence[stepIndex];
-      if (name !== target) {
+      if (!uniqueScaleNotes.includes(name)) {
         if (now - lastWrongRef.current < 500) return;
         lastWrongRef.current = now;
         triggerFlash(pos.stringId, pos.fret, "#d9694e", 650);
@@ -1072,25 +1080,15 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
       if (now - lastMatchRef.current < 500) return;
       lastMatchRef.current = now;
       triggerFlash(pos.stringId, pos.fret, "#7cb37a", 1800);
-
-      setStepIndex((i) => {
-        const next = i + 1;
-        if (next >= sequence.length) {
-          setCompletedLaps((c) => c + 1);
-          lapTimeoutRef.current = setTimeout(() => setStepIndex(0), 1400);
-          return i; // hold on the final note briefly before looping back to the start
-        }
-        return next;
-      });
+      setFoundNotes((prev) => (prev.includes(name) ? prev : [...prev, name]));
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, 110);
     return () => {
       clearInterval(intervalRef.current);
       clearTimeout(flashTimeoutRef.current);
-      clearTimeout(lapTimeoutRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mic.status, stepIndex, sequence.join(","), guitarStrings, activeStrings, maxFret, revealScale, activePosition.start, activePosition.end]);
+  }, [mic.status, sequence.join(","), guitarStrings, activeStrings, maxFret, revealScale, activePosition.start, activePosition.end]);
 
   const scaleNoteSet = new Set(sequence);
   const rootNote = CHROMATIC[rootIdx];
@@ -1109,15 +1107,15 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
       })
     : [];
   const markers = [...revealMarkers, ...(flash ? [{ stringId: flash.stringId, fret: flash.fret, filled: true, color: flash.color }] : [])];
-  const justCompleted = stepIndex >= sequence.length - 1 && completedLaps > 0 && Date.now() - lastMatchRef.current < 1400;
+  const allFound = uniqueScaleNotes.every((n) => foundNotes.includes(n));
   const tunedCount = guitarStrings.filter((s) => tuning && tuning[s.id]).length;
 
   return (
     <div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 20 }}>
         <StatCard label="Scale" value={`${CHROMATIC[rootIdx]} ${scale.label}`} />
-        <StatCard label="Step" value={`${Math.min(stepIndex + 1, sequence.length)} / ${sequence.length}`} />
-        <StatCard label="Laps completed" value={completedLaps} />
+        <StatCard label="Found" value={`${foundNotes.length} / ${uniqueScaleNotes.length}`} />
+        <StatCard label="Strings tuned" value={`${tunedCount} / ${guitarStrings.length}`} />
       </div>
 
       <div style={{ marginBottom: 16 }}>
@@ -1146,7 +1144,7 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {positions.map((p, i) => (
                 <Chip key={i} active={positionIndex === i} onClick={() => setPositionIndex(i)}>
-                  {i + 1} (fr {p.start}–{p.end})
+                  {p.label} (fr {p.start}–{p.end})
                 </Chip>
               ))}
             </div>
@@ -1156,7 +1154,7 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
 
       {mic.status !== "active" && (
         <div style={{ textAlign: "center", padding: "22px 16px", border: "1px dashed #2a2f3a", borderRadius: 10, marginBottom: 20 }}>
-          <p style={{ color: "#9aa2ac", fontSize: 14, marginBottom: 14 }}>Scales listens through your microphone as you play through the sequence.</p>
+          <p style={{ color: "#9aa2ac", fontSize: 14, marginBottom: 14 }}>Scales listens through your microphone as you play.</p>
           <button className="ft-primary-btn" onClick={() => mic.start()} disabled={mic.status === "requesting"}>
             {mic.status === "requesting" ? "Requesting mic…" : "Enable microphone"}
           </button>
@@ -1166,12 +1164,10 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
 
       <div style={{ display: "flex", justifyContent: "center", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
         {sequence.map((n, i) => {
-          const done = i < stepIndex;
-          const isCurrent = i === stepIndex;
+          const found = foundNotes.includes(n);
           return (
             <div
               key={i}
-              className={isCurrent ? "ft-title" : ""}
               style={{
                 width: 34,
                 height: 34,
@@ -1179,10 +1175,10 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
                 alignItems: "center",
                 justifyContent: "center",
                 borderRadius: "50%",
-                fontSize: isCurrent ? 16 : 14,
-                border: `1.5px solid ${isCurrent ? "#e0a95f" : done ? "#7cb37a" : "#2a2f3a"}`,
-                background: isCurrent ? "#e0a95f22" : done ? "#7cb37a22" : "transparent",
-                color: isCurrent ? "#f3ead9" : done ? "#8fbb7f" : "#5a6270",
+                fontSize: 14,
+                border: `1.5px solid ${found ? "#7cb37a" : "#2a2f3a"}`,
+                background: found ? "#7cb37a22" : "transparent",
+                color: found ? "#8fbb7f" : "#5a6270",
               }}
             >
               {n}
@@ -1204,25 +1200,25 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
         {viewMode === "fretboard" ? (
           <FretboardSVG maxFret={maxFret} activeStrings={activeStrings} markers={markers} pulse={flash} guitarStrings={guitarStrings} />
         ) : (
-          <NotationStaff sequenceAbs={sequenceAbs} stepIndex={stepIndex} wrong={!!flash && flash.color === "#d9694e"} />
+          <NotationStaff sequenceAbs={sequenceAbs} foundNotes={foundNotes} />
         )}
       </div>
 
       <div style={{ textAlign: "center", marginBottom: 18, minHeight: 40 }}>
-        {justCompleted ? (
+        {allFound ? (
           <div className="ft-title" style={{ fontSize: 18, color: "#8fbb7f" }}>
-            Lap complete — starting over
+            Every note in this scale found
           </div>
         ) : (
           <div style={{ fontSize: 14, color: "#9aa2ac" }}>
-            Play <strong style={{ color: "#f3ead9" }}>{sequence[stepIndex]}</strong> next — anywhere on the neck.
+            Play any note in <strong style={{ color: "#f3ead9" }}>{CHROMATIC[rootIdx]} {scale.label}</strong> — any string, any order.
           </div>
         )}
       </div>
 
       <div style={{ textAlign: "center", marginBottom: 10 }}>
         <button onClick={resetRun} style={{ background: "transparent", border: "1px solid #2a2f3a", color: "#9aa2ac", borderRadius: 8, padding: "8px 14px", cursor: "pointer", fontSize: 13 }}>
-          Restart from the root
+          Reset progress
         </button>
       </div>
 
@@ -1241,7 +1237,7 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
 
 export default function FretboardTrainer() {
   const [page, setPage] = useState("tuner");
-  const [maxFret, setMaxFret] = useState(12);
+  const maxFret = 15; // fixed — no longer a user setting
   const [tuningPresetId, setTuningPresetId] = useState("standard");
   const [activeStrings, setActiveStrings] = useState(STRINGS.map((s) => s.id));
   const [tuning, setTuning] = useState(null); // null = loading; holds mic-CALIBRATED frequencies (separate from the tuning preset above)
@@ -1352,32 +1348,6 @@ export default function FretboardTrainer() {
             <div className="ft-mono" style={{ fontSize: 11, letterSpacing: 1, color: "#e0a95f", marginBottom: 10 }}>
               SETTINGS
             </div>
-            {page !== "tuner" && (
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Fret range</div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  {[5, 12, 15, 22, 24].map((n) => (
-                    <Chip key={n} active={maxFret === n} onClick={() => setMaxFret(n)}>
-                      0–{n}
-                    </Chip>
-                  ))}
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#9aa2ac" }}>
-                    custom:
-                    <input
-                      type="number"
-                      min={3}
-                      max={24}
-                      value={maxFret}
-                      onChange={(e) => {
-                        const n = parseInt(e.target.value, 10);
-                        if (!isNaN(n)) setMaxFret(Math.max(3, Math.min(24, n)));
-                      }}
-                      style={{ width: 52, background: "#12151a", border: "1px solid #2a2f3a", borderRadius: 6, color: "#f3ead9", padding: "5px 6px", fontSize: 13 }}
-                    />
-                  </label>
-                </div>
-              </div>
-            )}
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Tuning</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
