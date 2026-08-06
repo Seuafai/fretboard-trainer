@@ -479,57 +479,68 @@ function pitchClassToNatural(name) {
 function noteNameToStepsFromE4(letter, octave) {
   return octave * 7 + NATURAL_LETTERS.indexOf(letter) - (4 * 7 + 2);
 }
-function freqToStaffInfo(freq) {
-  const midi = Math.round(69 + 12 * Math.log2(freq / 440));
-  const displayMidi = midi + 12; // guitar notation is written one octave above concert pitch
-  const octave = Math.floor(displayMidi / 12) - 1;
-  const pcName = CHROMATIC[((displayMidi % 12) + 12) % 12];
-  const { letter, sharp } = pitchClassToNatural(pcName);
-  return { stepsFromE4: noteNameToStepsFromE4(letter, octave), sharp };
-}
-function pitchClassToStaffInfo(name, assumedOctave = 4) {
-  const { letter, sharp } = pitchClassToNatural(name);
-  return { stepsFromE4: noteNameToStepsFromE4(letter, assumedOctave), sharp };
+
+function ledgerYsFor(stepsFromE4, bottomLineY, halfStep) {
+  const ys = [];
+  if (stepsFromE4 < 0) {
+    for (let s = -2; s >= stepsFromE4 - (stepsFromE4 % 2 === 0 ? 0 : 1); s -= 2) ys.push(bottomLineY - s * halfStep);
+  } else if (stepsFromE4 > 8) {
+    for (let s = 10; s <= stepsFromE4 + (stepsFromE4 % 2 === 0 ? 0 : 1); s += 2) ys.push(bottomLineY - s * halfStep);
+  }
+  return ys;
 }
 
-function NotationStaff({ freq, pitchClass, color }) {
-  const info = freq ? freqToStaffInfo(freq) : pitchClassToStaffInfo(pitchClass);
+// shows the whole scale laid out on the staff at once; notes already played this lap turn green,
+// the current target glows gold (and rings red briefly on a wrong note), the rest stay neutral
+function NotationStaff({ sequenceAbs, stepIndex, wrong }) {
   const lineSpacing = 12;
   const halfStep = lineSpacing / 2;
   const bottomLineY = 96; // E4, the bottom staff line
-  const noteX = 90;
-  const noteY = bottomLineY - info.stepsFromE4 * halfStep;
-  const viewH = Math.max(180, Math.abs(noteY) + 60, noteY + 60);
+  const startX = 46;
+  const stepX = 28;
 
-  const ledgerLines = [];
-  if (info.stepsFromE4 < 0) {
-    for (let s = -2; s >= info.stepsFromE4 - (info.stepsFromE4 % 2 === 0 ? 0 : 1); s -= 2) {
-      ledgerLines.push(bottomLineY - s * halfStep);
-    }
-  } else if (info.stepsFromE4 > 8) {
-    for (let s = 10; s <= info.stepsFromE4 + (info.stepsFromE4 % 2 === 0 ? 0 : 1); s += 2) {
-      ledgerLines.push(bottomLineY - s * halfStep);
-    }
-  }
+  const notes = sequenceAbs.map((abs, i) => {
+    const octave = 4 + Math.floor(abs / 12);
+    const pcName = CHROMATIC[((abs % 12) + 12) % 12];
+    const { letter, sharp } = pitchClassToNatural(pcName);
+    const stepsFromE4 = noteNameToStepsFromE4(letter, octave);
+    return { x: startX + i * stepX, y: bottomLineY - stepsFromE4 * halfStep, sharp, stepsFromE4 };
+  });
+
+  const allY = notes.map((n) => n.y);
+  const viewW = startX + sequenceAbs.length * stepX + 20;
+  const viewH = Math.max(160, bottomLineY - Math.min(...allY) + 40, Math.max(...allY) - (bottomLineY - 4 * lineSpacing) + 40);
+  const lineRight = startX + (sequenceAbs.length - 1) * stepX + 20;
 
   return (
     <div style={{ overflowX: "auto", background: "#100e0b", border: "1px solid #2a2f3a", borderRadius: 10, padding: "16px 6px", display: "flex", justifyContent: "center" }}>
-      <svg width={180} height={viewH} viewBox={`0 0 180 ${viewH}`} style={{ maxWidth: "100%", height: "auto" }}>
+      <svg width={viewW} height={viewH} viewBox={`0 0 ${viewW} ${viewH}`} style={{ maxWidth: "100%", height: "auto" }}>
         {[0, 1, 2, 3, 4].map((i) => (
-          <line key={i} x1={20} x2={160} y1={bottomLineY - i * lineSpacing} y2={bottomLineY - i * lineSpacing} stroke="#5a6270" strokeWidth={1.2} />
+          <line key={i} x1={20} x2={lineRight} y1={bottomLineY - i * lineSpacing} y2={bottomLineY - i * lineSpacing} stroke="#5a6270" strokeWidth={1.2} />
         ))}
         <text x={22} y={bottomLineY - lineSpacing * 1.2} fontSize={40} fill="#7a8290">
           𝄞
         </text>
-        {ledgerLines.map((y, i) => (
-          <line key={i} x1={noteX - 12} x2={noteX + 12} y1={y} y2={y} stroke="#7a8290" strokeWidth={1.2} />
-        ))}
-        {info.sharp && (
-          <text x={noteX - 22} y={noteY + 5} fontSize={15} fill={color || "#e0a95f"}>
-            ♯
-          </text>
-        )}
-        <ellipse cx={noteX} cy={noteY} rx={7} ry={5.5} fill={color || "#e0a95f"} transform={`rotate(-18 ${noteX} ${noteY})`} />
+        {notes.map((n, i) => {
+          const done = i < stepIndex;
+          const isCurrent = i === stepIndex;
+          const color = done ? "#7cb37a" : isCurrent ? "#e0a95f" : "#f3ead9";
+          const ledgerYs = ledgerYsFor(n.stepsFromE4, bottomLineY, halfStep);
+          return (
+            <g key={i}>
+              {ledgerYs.map((y, li) => (
+                <line key={li} x1={n.x - 11} x2={n.x + 11} y1={y} y2={y} stroke="#7a8290" strokeWidth={1.2} />
+              ))}
+              {isCurrent && <circle cx={n.x} cy={n.y} r={13} fill="none" stroke={wrong ? "#d9694e" : "#e0a95f"} strokeWidth={2} opacity={0.8} />}
+              {n.sharp && (
+                <text x={n.x - 20} y={n.y + 5} fontSize={14} fill={color}>
+                  ♯
+                </text>
+              )}
+              <ellipse cx={n.x} cy={n.y} rx={7} ry={5.5} fill={color} transform={`rotate(-18 ${n.x} ${n.y})`} />
+            </g>
+          );
+        })}
       </svg>
     </div>
   );
@@ -1008,7 +1019,8 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
   const lapTimeoutRef = useRef(null);
 
   const scale = SCALE_PATTERNS.find((s) => s.id === scaleId) || SCALE_PATTERNS[0];
-  const sequence = [...scale.intervals.map((iv) => CHROMATIC[(rootIdx + iv) % 12]), CHROMATIC[rootIdx]]; // ends back on the root
+  const sequenceAbs = [...scale.intervals, 12].map((iv) => rootIdx + iv); // ascending absolute semitone offsets, used for staff octave placement
+  const sequence = sequenceAbs.map((abs) => CHROMATIC[((abs % 12) + 12) % 12]); // ends back on the root
 
   // slide a ~5-fret window across the whole range, stepping by 3 frets so windows overlap —
   // gives several playable positions even within a single 12-fret span, not just once per root recurrence
@@ -1192,11 +1204,7 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
         {viewMode === "fretboard" ? (
           <FretboardSVG maxFret={maxFret} activeStrings={activeStrings} markers={markers} pulse={flash} guitarStrings={guitarStrings} />
         ) : (
-          <NotationStaff
-            freq={flash ? freqAt(guitarStrings.find((s) => s.id === flash.stringId).openFreq, flash.fret) : null}
-            pitchClass={sequence[stepIndex]}
-            color={flash ? flash.color : "#e0a95f"}
-          />
+          <NotationStaff sequenceAbs={sequenceAbs} stepIndex={stepIndex} wrong={!!flash && flash.color === "#d9694e"} />
         )}
       </div>
 
