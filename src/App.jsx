@@ -996,18 +996,14 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
   const scaleNoteSet = new Set(sequence);
   const rootNote = CHROMATIC[rootIdx];
 
-  // find every fret where the root falls on the lowest active string, each becomes a selectable "position"
-  const refString = [...guitarStrings].filter((s) => activeStrings.includes(s.id)).sort((a, b) => a.openFreq - b.openFreq)[0];
-  const rootFrets = [];
-  if (refString) {
-    for (let fret = 0; fret <= maxFret; fret++) {
-      if (noteAt(refString.open, fret) === rootNote) rootFrets.push(fret);
-    }
+  // slide a ~5-fret window across the whole range, stepping by 3 frets so windows overlap —
+  // gives several playable positions even within a single 12-fret span, not just once per root recurrence
+  const positions = [];
+  for (let start = 0; start <= maxFret; start += 3) {
+    const end = Math.min(maxFret, start + 4);
+    positions.push({ start, end });
+    if (end >= maxFret) break;
   }
-  const positions = (rootFrets.length ? rootFrets : [0]).map((r) => ({
-    start: Math.max(0, r - 1),
-    end: Math.min(maxFret, r + 3),
-  }));
   const activePosition = positions[Math.min(positionIndex, positions.length - 1)] || { start: 0, end: Math.min(maxFret, 4) };
 
   const revealMarkers = revealScale
