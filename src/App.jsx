@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 
 const CHROMATIC = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
@@ -898,6 +898,92 @@ function nearestPosition(freq, guitarStrings, activeStrings, maxFret, preferredR
   return search(0, maxFret, Infinity);
 }
 
+// Recognized scale positions via the notes-per-string system:
+//   7-note scales -> 3 notes per string (7 positions), 5/6-note scales -> 2 notes per string (5/6 boxes).
+// Each position starts on a consecutive scale degree on the low-E string and walks the scale
+// upward across the strings. Consecutive strings are tuned a 4th (5 semitones) apart except the
+// G->B break (4 semitones); the drift between strings is exactly the scale distance of `nps`
+// degrees minus the tuning offset, which is what produces the textbook boxes.
+function buildScalePositions(rootIdx, scale, maxFret, guitarStrings) {
+  const intervals = scale.intervals;
+  const N = intervals.length;
+  const nps = N === 5 || N === 6 ? 2 : 3;
+  const strings = [...guitarStrings].reverse(); // low E first
+  const pcs = intervals.map((iv) => CHROMATIC[((rootIdx + iv) % 12 + 12) % 12]);
+  const semisOf = (k) => intervals[k % N] + 12 * Math.floor(k / N);
+
+  const tuningOffsets = [];
+  for (let i = 0; i < strings.length - 1; i++) {
+    const a = CHROMATIC.indexOf(strings[i].open);
+    const b = CHROMATIC.indexOf(strings[i + 1].open);
+    tuningOffsets.push((((b - a) % 12) + 12) % 12);
+  }
+
+  const occ = strings.map((s) => {
+    const map = {};
+    for (let f = 0; f <= maxFret; f++) {
+      const n = noteAt(s.open, f);
+      (map[n] = map[n] || []).push(f);
+    }
+    return map;
+  });
+
+  // nearest occurrence to `target`, but only within half an octave so we can't
+  // accidentally jump to the wrong octave's occurrence (pcs repeat every 12 frets)
+  const pick = (list, target) => {
+    if (!list) return null;
+    let best = null;
+    for (const f of list) {
+      if (Math.abs(f - target) > 6) continue;
+      if (best === null || Math.abs(f - target) < Math.abs(best - target)) best = f;
+    }
+    return best;
+  };
+
+  const positions = [];
+  for (let p = 0; p < N; p++) {
+    const anchors = occ[0][pcs[p]] || [];
+    let built = null;
+    for (const anchor of anchors) {
+      const notes = [];
+      let startFret = anchor;
+      let ok = true;
+      for (let i = 0; i < strings.length; i++) {
+        const baseIdx = p + nps * i;
+        const firstFret = pick(occ[i][pcs[baseIdx % N]], startFret);
+        if (firstFret === null) {
+          ok = false;
+          break;
+        }
+        notes.push({ stringId: strings[i].id, fret: firstFret, degree: baseIdx % N });
+        let prevFret = firstFret;
+        for (let j = 1; j < nps; j++) {
+          const absIdx = baseIdx + j;
+          const expected = prevFret + (semisOf(absIdx) - semisOf(baseIdx + j - 1));
+          const fret = pick(occ[i][pcs[absIdx % N]], expected);
+          if (fret === null) {
+            ok = false;
+            break;
+          }
+          notes.push({ stringId: strings[i].id, fret, degree: absIdx % N });
+          prevFret = fret;
+        }
+        if (!ok) break;
+        if (i < strings.length - 1) {
+          startFret = firstFret + (semisOf(baseIdx + nps) - semisOf(baseIdx) - tuningOffsets[i]);
+        }
+      }
+      if (ok) {
+        const frets = notes.map((n) => n.fret);
+        built = { notes, start: Math.min(...frets), end: Math.max(...frets), labelNote: pcs[p] };
+        break;
+      }
+    }
+    if (built) positions.push(built);
+  }
+  return positions;
+}
+
 function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune, guitarStrings }) {
   const [note, setNote] = useState(() => CHROMATIC[Math.floor(Math.random() * 12)]);
   const [reading, setReading] = useState(null);
@@ -1019,28 +1105,13 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
   const sequence = sequenceAbs.map((abs) => CHROMATIC[((abs % 12) + 12) % 12]); // ends back on the root
   const uniqueScaleNotes = [...new Set(sequence)];
 
-  // find each place the root note falls on the lowest active string, then offer 3 shape
-  // variants per occurrence — root near the bottom, middle, or top of a playable hand-span
-  const refString = [...guitarStrings].filter((s) => activeStrings.includes(s.id)).sort((a, b) => a.openFreq - b.openFreq)[0];
-  const rootNoteForPositions = CHROMATIC[rootIdx];
-  const rootFrets = [];
-  if (refString) {
-    for (let fret = 0; fret <= maxFret; fret++) {
-      if (noteAt(refString.open, fret) === rootNoteForPositions) rootFrets.push(fret);
-    }
-  }
-  const positions = [];
-  rootFrets.forEach((r) => {
-    const variants = [
-      { start: r, end: Math.min(maxFret, r + 4), label: "root low" },
-      { start: Math.max(0, r - 2), end: Math.min(maxFret, r + 2), label: "root mid" },
-      { start: Math.max(0, r - 4), end: r, label: "root high" },
-    ];
-    variants.forEach((v) => {
-      if (v.end - v.start >= 3) positions.push(v); // skip degenerate windows too close to the neck's edge
-    });
-  });
-  const activePosition = positions[Math.min(positionIndex, positions.length - 1)] || { start: 0, end: Math.min(maxFret, 4) };
+  // recognized notes-per-string positions (2NPS for pentatonic/blues, 3NPS for 7-note scales),
+  // anchored one position per scale degree on the low-E string
+  const scalePositions = useMemo(
+    () => buildScalePositions(rootIdx, scale, maxFret, guitarStrings),
+    [rootIdx, scale, maxFret, guitarStrings]
+  );
+  const activePosition = scalePositions[Math.min(positionIndex, scalePositions.length - 1)];
 
   const triggerFlash = useCallback((stringId, fret, color, duration) => {
     setFlash({ stringId, fret, color });
@@ -1068,7 +1139,13 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
       const { name } = freqToNote(s.freq);
       setReading({ name });
       const now = Date.now();
-      const pos = nearestPosition(s.freq, guitarStrings, activeStrings, maxFret, revealScale ? activePosition : null);
+      const pos = nearestPosition(
+        s.freq,
+        guitarStrings,
+        activeStrings,
+        maxFret,
+        revealScale && activePosition ? { start: activePosition.start, end: activePosition.end } : null
+      );
       if (!pos) return;
 
       if (!uniqueScaleNotes.includes(name)) {
@@ -1088,24 +1165,18 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
       clearTimeout(flashTimeoutRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mic.status, sequence.join(","), guitarStrings, activeStrings, maxFret, revealScale, activePosition.start, activePosition.end]);
+  }, [mic.status, sequence.join(","), guitarStrings, activeStrings, maxFret, revealScale, scalePositions, positionIndex]);
 
-  const scaleNoteSet = new Set(sequence);
-  const rootNote = CHROMATIC[rootIdx];
+  const npsLabels = scalePositions.length ? (scale.intervals.length === 5 || scale.intervals.length === 6 ? "Box" : "Position") : "Position";
 
-  const revealMarkers = revealScale
-    ? guitarStrings.flatMap((s) => {
-        if (!activeStrings.includes(s.id)) return [];
-        const out = [];
-        for (let fret = activePosition.start; fret <= activePosition.end; fret++) {
-          const n = noteAt(s.open, fret);
-          if (!scaleNoteSet.has(n)) continue;
-          const isRoot = n === rootNote;
-          out.push({ stringId: s.id, fret, filled: isRoot, big: isRoot, color: isRoot ? "#e0a95f" : "#e0a95f77" });
-        }
-        return out;
-      })
-    : [];
+  const revealMarkers =
+    revealScale && activePosition
+      ? activePosition.notes.flatMap((n) => {
+          if (!activeStrings.includes(n.stringId)) return [];
+          const isRoot = n.degree === 0;
+          return [{ stringId: n.stringId, fret: n.fret, filled: isRoot, big: isRoot, color: isRoot ? "#e0a95f" : "#e0a95f77" }];
+        })
+      : [];
   const markers = [...revealMarkers, ...(flash ? [{ stringId: flash.stringId, fret: flash.fret, filled: true, color: flash.color }] : [])];
   const allFound = uniqueScaleNotes.every((n) => foundNotes.includes(n));
   const tunedCount = guitarStrings.filter((s) => tuning && tuning[s.id]).length;
@@ -1142,9 +1213,10 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
           <div style={{ marginTop: 10 }}>
             <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Position</div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {positions.map((p, i) => (
+              {scalePositions.map((p, i) => (
                 <Chip key={i} active={positionIndex === i} onClick={() => setPositionIndex(i)}>
-                  {p.label} (fr {p.start}–{p.end})
+                  {npsLabels} {i + 1}
+                  {i === 0 ? " · root" : ""} · {p.labelNote}
                 </Chip>
               ))}
             </div>
@@ -1312,7 +1384,7 @@ export default function FretboardTrainer() {
           {page === "tuner" && "Get in tune — it quietly teaches the app your guitar's voice at the same time."}
           {page === "identify" && "A brass marker lights up a fret. Name the note before it fades."}
           {page === "find" && "Play back the note the app calls out — everywhere it lives on the neck."}
-          {page === "scales" && "Pick a scale and play it in order — one note calls the next."}
+          {page === "scales" && "Pick a scale, choose a position, and play its notes — recognized fretboard patterns."}
         </p>
 
         <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
