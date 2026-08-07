@@ -43,6 +43,66 @@ const SCALE_PATTERNS = [
   { id: "blues", label: "Blues", intervals: [0, 3, 5, 6, 7, 10] },
 ];
 
+// the seven modes of the major scale, in position order (position N starts on degree N)
+const MODE_NAMES = ["Ionian", "Dorian", "Phrygian", "Lydian", "Mixolydian", "Aeolian", "Locrian"];
+
+// The classic CAGED major-scale boxes — five overlapping shapes named after their chord form.
+// `strings` holds per-string fret numbers for G major (key root G, tonic fret on the anchor
+// string in `anchorFret`). Each box transposes to any key by shifting so the key's root lands
+// on the anchor string; every placed note is then pitch-class-checked against the major scale.
+// selectable pattern systems; each defines its own position-building strategy and the
+// scales it applies to. `allowedScales` = null means every scale works with it.
+const PATTERN_SYSTEMS = [
+  { id: "modes3nps", label: "Modes / 3NPS", defaultScale: "major", allowedScales: null },
+  { id: "caged", label: "CAGED boxes", defaultScale: "major", allowedScales: ["major"] },
+  { id: "penta", label: "Pentatonic boxes", defaultScale: "minorPent", allowedScales: ["majorPent", "minorPent"] },
+  { id: "blues", label: "Blues boxes", defaultScale: "blues", allowedScales: ["blues"] },
+  { id: "twoOctave", label: "Two-octave", defaultScale: "major", allowedScales: null },
+];
+function systemAllowsScale(systemId, scaleId) {
+  const sys = PATTERN_SYSTEMS.find((s) => s.id === systemId);
+  if (!sys || !sys.allowedScales) return true;
+  return sys.allowedScales.includes(scaleId);
+}
+
+const CAGED_FORMS = [
+  {
+    id: "E",
+    label: "E form",
+    anchorString: "e2",
+    anchorFret: 3,
+    strings: { e1: [2, 3, 5], B: [3, 5], G: [2, 4, 5], D: [2, 4, 5], A: [2, 3, 5], e2: [2, 3, 5] },
+  },
+  {
+    id: "D",
+    label: "D form",
+    anchorString: "D",
+    anchorFret: 5,
+    strings: { e1: [5, 7, 8], B: [5, 7, 8], G: [4, 5, 7], D: [4, 5, 7], A: [5, 7], e2: [5, 7, 8] },
+  },
+  {
+    id: "C",
+    label: "C form",
+    anchorString: "A",
+    anchorFret: 10,
+    strings: { e1: [7, 8, 10], B: [7, 8, 10], G: [7, 9], D: [7, 9, 10], A: [7, 9, 10], e2: [7, 8, 10] },
+  },
+  {
+    id: "A",
+    label: "A form",
+    anchorString: "A",
+    anchorFret: 10,
+    strings: { e1: [10, 12], B: [10, 12, 13], G: [9, 11, 12], D: [9, 10, 12], A: [9, 10, 12], e2: [10, 12] },
+  },
+  {
+    id: "G",
+    label: "G form",
+    anchorString: "e2",
+    anchorFret: 15,
+    strings: { e1: [12, 14, 15], B: [12, 13, 15], G: [11, 12, 14], D: [12, 14], A: [12, 14, 15], e2: [12, 14, 15] },
+  },
+];
+
 // shifts a standard-tuning reference frequency to a different note, picking the
 // nearest direction around the chromatic circle (correct for all alt-tuning shifts, which are small)
 function shiftFreq(standardFreq, standardLetter, targetLetter) {
@@ -458,6 +518,11 @@ function FretboardSVG({ maxFret, activeStrings, markers, pulse, guitarStrings = 
             <g key={i} onClick={m.onClick} style={{ cursor: m.onClick ? "pointer" : "default" }}>
               {isPulse && <circle cx={x} cy={y} r={18} fill="url(#markerglow2)" opacity={0.7} />}
               <circle cx={x} cy={y} r={m.big ? 12 : m.filled ? 10 : 9} fill={m.filled ? m.color : "transparent"} stroke={m.color} strokeWidth={m.filled ? 1.5 : 2} />
+              {m.finger != null && (
+                <text x={x} y={y + 3.5} fontSize={m.big ? 9 : 8} fontWeight={700} textAnchor="middle" className="ft-mono" fill={m.filled ? "#14171c" : "#e0a95f"}>
+                  {m.finger}
+                </text>
+              )}
             </g>
           );
         })}
@@ -984,6 +1049,172 @@ function buildScalePositions(rootIdx, scale, maxFret, guitarStrings) {
   return positions;
 }
 
+// builds the five classic CAGED boxes for the selected root. The shapes are stored as fret
+// positions for G major; transposing shifts the whole rigid shape so the key's root lands on
+// the form's anchor string. Each occurrence of the root on the anchor string is tried, nearest
+// to the shape's natural position first, until one fits within the neck; every placed note is
+// then pitch-class-checked against the major scale so any data slip fails fast.
+function buildCagedPositions(rootIdx, maxFret, guitarStrings) {
+  const major = SCALE_PATTERNS.find((s) => s.id === "major");
+  const pcs = major.intervals.map((iv) => CHROMATIC[((rootIdx + iv) % 12 + 12) % 12]);
+  const rootName = CHROMATIC[rootIdx];
+  const positions = [];
+  for (const form of CAGED_FORMS) {
+    const anchor = guitarStrings.find((s) => s.id === form.anchorString);
+    if (!anchor) continue;
+    const anchors = [];
+    for (let f = 0; f <= maxFret; f++) {
+      if (noteAt(anchor.open, f) === rootName) anchors.push(f);
+    }
+    anchors.sort((a, b) => Math.abs(a - form.anchorFret) - Math.abs(b - form.anchorFret));
+    let built = null;
+    for (const anchorFret of anchors) {
+      const shift = anchorFret - form.anchorFret;
+      const notes = [];
+      let ok = true;
+      for (const [sid, frets] of Object.entries(form.strings)) {
+        const s = guitarStrings.find((gs) => gs.id === sid);
+        if (!s) {
+          ok = false;
+          break;
+        }
+        for (const f of frets) {
+          const fret = f + shift;
+          if (fret < 0 || fret > maxFret) {
+            ok = false;
+            break;
+          }
+          const pc = noteAt(s.open, fret);
+          const deg = pcs.indexOf(pc);
+          if (deg === -1) {
+            ok = false;
+            break;
+          }
+          notes.push({ stringId: sid, fret, degree: deg });
+        }
+        if (!ok) break;
+      }
+      if (!ok) continue;
+      const frets = notes.map((n) => n.fret);
+      built = {
+        id: form.id,
+        label: form.label,
+        notes,
+        start: Math.min(...frets),
+        end: Math.max(...frets),
+        labelNote: rootName,
+      };
+      break;
+    }
+    if (built) positions.push(built);
+  }
+  return positions;
+}
+
+// two-octave scale shapes: start on the root of the 6th or 5th string and walk the scale
+// upward three notes per string, stopping exactly at the root two octaves up. Produces the
+// classic "two octave scale" shapes (root on low E, root on A).
+function buildTwoOctavePositions(rootIdx, scale, maxFret, guitarStrings) {
+  const intervals = scale.intervals;
+  const N = intervals.length;
+  const strings = [...guitarStrings].reverse(); // low E first
+  const pcs = intervals.map((iv) => CHROMATIC[((rootIdx + iv) % 12 + 12) % 12]);
+  const semisOf = (k) => intervals[k % N] + 12 * Math.floor(k / N);
+
+  const tuningOffsets = [];
+  for (let i = 0; i < strings.length - 1; i++) {
+    const a = CHROMATIC.indexOf(strings[i].open);
+    const b = CHROMATIC.indexOf(strings[i + 1].open);
+    tuningOffsets.push((((b - a) % 12) + 12) % 12);
+  }
+
+  const occ = strings.map((s) => {
+    const map = {};
+    for (let f = 0; f <= maxFret; f++) {
+      const n = noteAt(s.open, f);
+      (map[n] = map[n] || []).push(f);
+    }
+    return map;
+  });
+
+  const pick = (list, target) => {
+    if (!list) return null;
+    let best = null;
+    for (const f of list) {
+      if (Math.abs(f - target) > 6) continue;
+      if (best === null || Math.abs(f - target) < Math.abs(best - target)) best = f;
+    }
+    return best;
+  };
+
+  const positions = [];
+  for (let anchorIdx = 0; anchorIdx <= 1; anchorIdx++) {
+    const rootFrets = occ[anchorIdx][pcs[0]] || [];
+    for (const startFret of rootFrets) {
+      const notes = [];
+      let str = anchorIdx;
+      let prevFret = startFret;
+      let placedOnString = 1;
+      notes.push({ stringId: strings[str].id, fret: startFret, degree: 0 });
+      let ok = true;
+      for (let k = 1; k <= N * 2; k++) {
+        const deg = k % N;
+        const expected = prevFret + (semisOf(k) - semisOf(k - 1));
+        let fret = null;
+        if (placedOnString < 3 && str < strings.length) {
+          fret = pick(occ[str][pcs[deg]], expected);
+        }
+        if (fret === null && str < strings.length - 1) {
+          str++;
+          placedOnString = 0;
+          fret = pick(occ[str][pcs[deg]], expected - tuningOffsets[str - 1]);
+        }
+        if (fret === null) {
+          ok = false;
+          break;
+        }
+        notes.push({ stringId: strings[str].id, fret, degree: deg });
+        prevFret = fret;
+        placedOnString++;
+      }
+      if (!ok || notes.length !== N * 2 + 1) continue;
+      const frets = notes.map((n) => n.fret);
+      positions.push({
+        id: `two-oct-${anchorIdx}-${startFret}`,
+        label: `2-oct · ${strings[anchorIdx].label}`,
+        notes,
+        start: Math.min(...frets),
+        end: Math.max(...frets),
+        labelNote: pcs[0],
+      });
+    }
+  }
+  return positions;
+}
+
+// method-book finger numbers: within a 4-fret box each fret cell maps to one finger
+// (1 = index … 4 = pinky); wider 3NPS/two-octave shapes use the per-string convention
+// (fingers relative to the first note on that string, capped at 4).
+function addFingers(position) {
+  const notes = position ? position.notes : [];
+  if (!notes.length) return notes;
+  const frets = notes.map((n) => n.fret);
+  const span = Math.max(...frets) - Math.min(...frets);
+  if (span <= 3) {
+    const startFret = Math.min(...frets);
+    return notes.map((n) => ({ ...n, finger: n.fret - startFret + 1 }));
+  }
+  const byString = {};
+  for (const n of notes) (byString[n.stringId] = byString[n.stringId] || []).push(n);
+  const fingered = [];
+  for (const sid of Object.keys(byString)) {
+    const ns = byString[sid].slice().sort((a, b) => a.fret - b.fret);
+    const firstFret = ns[0].fret;
+    for (const n of ns) fingered.push({ ...n, finger: Math.max(1, Math.min(4, n.fret - firstFret + 1)) });
+  }
+  return fingered;
+}
+
 function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune, guitarStrings }) {
   const [note, setNote] = useState(() => CHROMATIC[Math.floor(Math.random() * 12)]);
   const [reading, setReading] = useState(null);
@@ -1089,6 +1320,9 @@ function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune, guitarStrings
 function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuning }) {
   const [rootIdx, setRootIdx] = useState(0); // index into CHROMATIC
   const [scaleId, setScaleId] = useState("major");
+  const [patternSystem, setPatternSystem] = useState("modes3nps");
+  const [anchorRoot, setAnchorRoot] = useState(false);
+  const [anchorString, setAnchorString] = useState("e2");
   const [reading, setReading] = useState(null);
   const [flash, setFlash] = useState(null);
   const [foundNotes, setFoundNotes] = useState([]); // pitch-class strings found this session, any order
@@ -1105,13 +1339,29 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
   const sequence = sequenceAbs.map((abs) => CHROMATIC[((abs % 12) + 12) % 12]); // ends back on the root
   const uniqueScaleNotes = [...new Set(sequence)];
 
-  // recognized notes-per-string positions (2NPS for pentatonic/blues, 3NPS for 7-note scales),
-  // anchored one position per scale degree on the low-E string
-  const scalePositions = useMemo(
-    () => buildScalePositions(rootIdx, scale, maxFret, guitarStrings),
-    [rootIdx, scale, maxFret, guitarStrings]
-  );
-  const activePosition = scalePositions[Math.min(positionIndex, scalePositions.length - 1)];
+  // positions depend on the chosen pattern system: modes/3NPS + pentatonic + blues use the
+  // notes-per-string walk; CAGED uses the five hand-verified classic boxes; two-octave builds
+  // the 2-octave shapes rooted on the low E and A strings.
+  const positions = useMemo(() => {
+    switch (patternSystem) {
+      case "caged":
+        return buildCagedPositions(rootIdx, maxFret, guitarStrings);
+      case "twoOctave":
+        return buildTwoOctavePositions(rootIdx, scale, maxFret, guitarStrings);
+      default:
+        return buildScalePositions(rootIdx, scale, maxFret, guitarStrings);
+    }
+  }, [patternSystem, rootIdx, scale, maxFret, guitarStrings]);
+
+  // when anchoring, pick the position whose root note (degree 0) sits on the chosen anchor
+  // string at the lowest fret — the "same shape, different root string/note" practice flow
+  const anchoredPosition = useMemo(() => {
+    if (!anchorRoot) return null;
+    const candidates = positions.filter((p) => p.notes.some((n) => n.degree === 0 && n.stringId === anchorString));
+    if (!candidates.length) return null;
+    return candidates.reduce((a, b) => (a.start <= b.start ? a : b));
+  }, [positions, anchorRoot, anchorString]);
+  const activePosition = anchoredPosition || positions[Math.min(positionIndex, positions.length - 1)];
 
   const triggerFlash = useCallback((stringId, fret, color, duration) => {
     setFlash({ stringId, fret, color });
@@ -1128,8 +1378,12 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
   useEffect(() => {
     resetRun();
     setPositionIndex(0);
+    if (!systemAllowsScale(patternSystem, scaleId)) {
+      const sys = PATTERN_SYSTEMS.find((s) => s.id === patternSystem);
+      if (sys) setScaleId(sys.defaultScale);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rootIdx, scaleId]);
+  }, [rootIdx, scaleId, patternSystem]);
 
   useEffect(() => {
     if (mic.status !== "active") return;
@@ -1165,16 +1419,23 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
       clearTimeout(flashTimeoutRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mic.status, sequence.join(","), guitarStrings, activeStrings, maxFret, revealScale, scalePositions, positionIndex]);
+  }, [mic.status, sequence.join(","), guitarStrings, activeStrings, maxFret, revealScale, positions, positionIndex, anchorRoot, anchorString]);
 
-  const npsLabels = scalePositions.length ? (scale.intervals.length === 5 || scale.intervals.length === 6 ? "Box" : "Position") : "Position";
+  const isBoxScale = scale.intervals.length === 5 || scale.intervals.length === 6;
+  const isModeScale = patternSystem === "modes3nps" && scale.id === "major" && !isBoxScale;
+  const positionLabel = (p, i) => {
+    if (patternSystem === "caged" || patternSystem === "twoOctave") return p.label;
+    if (isBoxScale) return `Box ${i + 1} · ${p.labelNote}`;
+    if (isModeScale) return `Position ${i + 1} · ${MODE_NAMES[i] || ""}`.trim();
+    return `Position ${i + 1} · ${p.labelNote}`;
+  };
 
   const revealMarkers =
     revealScale && activePosition
-      ? activePosition.notes.flatMap((n) => {
+      ? addFingers(activePosition).flatMap((n) => {
           if (!activeStrings.includes(n.stringId)) return [];
           const isRoot = n.degree === 0;
-          return [{ stringId: n.stringId, fret: n.fret, filled: isRoot, big: isRoot, color: isRoot ? "#e0a95f" : "#e0a95f77" }];
+          return [{ stringId: n.stringId, fret: n.fret, filled: isRoot, big: isRoot, color: isRoot ? "#e0a95f" : "#e0a95f77", finger: n.finger }];
         })
       : [];
   const markers = [...revealMarkers, ...(flash ? [{ stringId: flash.stringId, fret: flash.fret, filled: true, color: flash.color }] : [])];
@@ -1190,6 +1451,14 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
       </div>
 
       <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Pattern system</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+          {PATTERN_SYSTEMS.map((sys) => (
+            <Chip key={sys.id} active={patternSystem === sys.id} onClick={() => setPatternSystem(sys.id)}>
+              {sys.label}
+            </Chip>
+          ))}
+        </div>
         <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Root note</div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
           {CHROMATIC.map((n, i) => (
@@ -1200,26 +1469,47 @@ function ScalesMode({ mic, maxFret, activeStrings, guitarStrings, onGoTune, tuni
         </div>
         <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Scale</div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-          {SCALE_PATTERNS.map((sc) => (
+          {SCALE_PATTERNS.filter((sc) => systemAllowsScale(patternSystem, sc.id)).map((sc) => (
             <Chip key={sc.id} active={scaleId === sc.id} onClick={() => setScaleId(sc.id)}>
               {sc.label}
             </Chip>
           ))}
         </div>
-        <Chip active={revealScale} onClick={() => setRevealScale((v) => !v)}>
-          {revealScale ? "Reveal on" : "Reveal scale positions"}
-        </Chip>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <Chip active={revealScale} onClick={() => setRevealScale((v) => !v)}>
+            {revealScale ? "Reveal on" : "Reveal scale positions"}
+          </Chip>
+          {revealScale && (
+            <Chip active={anchorRoot} onClick={() => setAnchorRoot((v) => !v)}>
+              {anchorRoot ? `Anchor: root on ${(guitarStrings.find((s) => s.id === anchorString) || {}).label || anchorString}` : "Anchor to root string"}
+            </Chip>
+          )}
+        </div>
         {revealScale && (
           <div style={{ marginTop: 10 }}>
-            <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Position</div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {scalePositions.map((p, i) => (
-                <Chip key={i} active={positionIndex === i} onClick={() => setPositionIndex(i)}>
-                  {npsLabels} {i + 1}
-                  {i === 0 ? " · root" : ""} · {p.labelNote}
-                </Chip>
-              ))}
-            </div>
+            {anchorRoot ? (
+              <>
+                <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Anchor root to string</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {guitarStrings.map((s) => (
+                    <Chip key={s.id} active={anchorString === s.id} onClick={() => setAnchorString(s.id)}>
+                      {s.label}
+                    </Chip>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Position</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {positions.map((p, i) => (
+                    <Chip key={p.id || i} active={positionIndex === i} onClick={() => setPositionIndex(i)}>
+                      {positionLabel(p, i)}
+                    </Chip>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
