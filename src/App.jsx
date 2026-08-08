@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMic } from "./audio.js";
 import { storage, TUNING_KEY } from "./storage.js";
 import { CHROMATIC, STRINGS, TUNING_PRESETS, tunedStrings } from "./theory.js";
@@ -7,6 +7,7 @@ import TunerPage from "./components/TunerPage.jsx";
 import IdentifyMode from "./components/IdentifyMode.jsx";
 import FindMode from "./components/FindMode.jsx";
 import ScalesMode from "./components/ScalesMode.jsx";
+import CalibrationTest from "./components/CalibrationTest.jsx";
 
 const MAX_FRET = 24; // a standard 24-fret neck — lets every CAGED form (incl. the G form at the 15th) fit in every key
 
@@ -18,7 +19,7 @@ export default function FretboardTrainer() {
   const mic = useMic();
 
   const tuningPreset = TUNING_PRESETS.find((t) => t.id === tuningPresetId) || TUNING_PRESETS[0];
-  const guitarStrings = tunedStrings(tuningPreset.notes);
+  const guitarStrings = useMemo(() => tunedStrings(tuningPreset.notes), [tuningPreset]);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +55,23 @@ export default function FretboardTrainer() {
       storage.set(TUNING_KEY, JSON.stringify(next)).catch(() => {});
       return next;
     });
+  }, []);
+
+  // stable callback: records a timbre fingerprint at a unison spot (stringId, fret)
+  // so the Find It tie-break can tell which string a note was actually played on.
+  const updateSpot = useCallback((stringId, fret, data) => {
+    setTuning((prev) => {
+      const s = (prev && prev[stringId]) || {};
+      const next = { ...(prev || {}), [stringId]: { ...s, spots: { ...(s.spots || {}), [fret]: { ...data, freq: (s.freq && data.freq) || null } } } };
+      storage.set(TUNING_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const goFind = () => setPage("find");
+    window.addEventListener("ft-go-find", goFind);
+    return () => window.removeEventListener("ft-go-find", goFind);
   }, []);
 
   function toggleString(id) {
@@ -101,6 +119,7 @@ export default function FretboardTrainer() {
           {page === "identify" && "A brass marker lights up a fret. Name the note before it fades."}
           {page === "find" && "Play back the note the app calls out — everywhere it lives on the neck."}
           {page === "scales" && "Pick a scale, choose a position, and play its notes — recognized fretboard patterns."}
+          {page === "calibrate" && "Record your guitar's timbre at every shared-note spot so Find It knows which string you actually played."}
         </p>
 
         <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
@@ -116,6 +135,9 @@ export default function FretboardTrainer() {
           <Chip active={page === "scales"} onClick={() => setPage("scales")}>
             Scales
           </Chip>
+          <Chip active={page === "calibrate"} onClick={() => setPage("calibrate")}>
+            Calibrate
+          </Chip>
         </div>
 
         {page !== "tuner" && <TuneBanner tuning={tuning} onGoTune={() => setPage("tuner")} guitarStrings={guitarStrings} />}
@@ -128,6 +150,7 @@ export default function FretboardTrainer() {
             {page === "identify" && <IdentifyMode maxFret={MAX_FRET} activeStrings={activeStrings} guitarStrings={guitarStrings} />}
             {page === "find" && <FindMode mic={mic} maxFret={MAX_FRET} activeStrings={activeStrings} tuning={tuning} onGoTune={() => setPage("tuner")} guitarStrings={guitarStrings} />}
             {page === "scales" && <ScalesMode mic={mic} maxFret={MAX_FRET} activeStrings={activeStrings} guitarStrings={guitarStrings} tuning={tuning} onGoTune={() => setPage("tuner")} />}
+            {page === "calibrate" && <CalibrationTest mic={mic} tuning={tuning} onUpdateSpot={updateSpot} maxFret={MAX_FRET} guitarStrings={guitarStrings} />}
           </div>
         )}
 

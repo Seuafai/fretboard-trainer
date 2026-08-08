@@ -276,72 +276,105 @@ export function fretFraction(n) {
 
 // ---------- note detection ----------
 
-// cosine similarity between two harmonic fingerprints (5 ratios to the fundamental).
-// Same string plucked at any fret keeps its timbre shape; an unrelated source (a TV,
-// synth, another instrument) has a very different harmonic profile → low similarity.
-export function fingerprintSimilarity(a, b) {
-  if (!a || !b || a.length !== b.length) return 0;
-  let dot = 0,
-    na = 0,
-    nb = 0;
+// timbre distance between two harmonic fingerprints (ratios of harmonics 2..6 to
+// the fundamental). Cosine similarity can't separate these — the profiles are all
+// decaying and nearly co-linear — so we compare the actual ratio magnitudes on a
+// log scale. Same string ≈ 0.05–0.3 octaves of mean divergence, a different string
+// of the same note more, a TV/synth beep far more (its harmonic ratios are ~0).
+export function fingerprintDistance(a, b) {
+  if (!a || !b || a.length !== b.length) return Infinity;
+  let s = 0;
   for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    na += a[i] * a[i];
-    nb += b[i] * b[i];
+    const x = Math.max(a[i], 0.01);
+    const y = Math.max(b[i], 0.01);
+    s += Math.abs(Math.log2(x / y));
   }
-  if (!na || !nb) return 0;
-  return dot / Math.sqrt(na * nb);
+  return s / a.length;
 }
 
-// minimum fingerprint similarity required to accept a note as coming from a tuned string.
-// Tunable: raise it to be stricter (more false rejects), lower to be more forgiving.
-export const FINGERPRINT_MATCH = 0.5;
+// maximum mean octaves of timbre divergence for a note to count as coming from the
+// calibrated guitar. Tunable: lower = stricter (more false rejects), higher = more forgiving.
+export const FINGERPRINT_MATCH = 0.8;
 
 // pitch tolerance (cents) for a reading to count as a note on the neck at all
 export const PITCH_TOLERANCE = 50;
+
+// the fretted positions that are a unison with some other string's open note —
+// pitch alone can't tell those apart, so the calibration test records a timbre
+// fingerprint at each one and the tie-break below compares against the spot.
+export function unisonSpots(guitarStrings, maxFret) {
+  const seen = new Set();
+  const spots = [];
+  guitarStrings.forEach((a) => {
+    guitarStrings.forEach((b) => {
+      if (a.id === b.id) return;
+      for (let fret = 1; fret <= maxFret; fret++) {
+        if (Math.abs(centsBetween(freqAt(a.openFreq, fret), b.openFreq)) < 5) {
+          const key = `${a.id}:${fret}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            spots.push({ stringId: a.id, fret, note: b.open });
+          }
+          break;
+        }
+      }
+    });
+  });
+  const order = new Map(guitarStrings.map((s, i) => [s.id, i]));
+  spots.sort((x, y) => (order.get(y.stringId) ?? 0) - (order.get(x.stringId) ?? 0) || x.fret - y.fret);
+  return spots;
+}
 
 // finds the neck position nearest `freq`. Uses each string's mic-calibrated open
 // frequency when available (so tuning actually sharpens detection). Many notes live
 // at the exact same pitch on neighbouring strings (G = string 3 open = string 4
 // fret 5), so when several positions are within a small cents band of the best we
 // break the tie with the string whose calibrated harmonic fingerprint is closest to
-// the live sound. A reading that matches no calibrated string at all is rejected
-// (that's how TV/synth tones are blocked).
+// the live sound. When a fingerprint was recorded at the exact spot (the calibration
+// test), that one is used; otherwise the string's open fingerprint is the fallback.
+// A reading that matches no calibrated string at all is rejected (TV/synth tones).
 export function nearestPosition(freq, guitarStrings, activeStrings, maxFret, preferredRange, tuning, fingerprint) {
   const openFreqFor = (s) => {
     const cal = tuning && tuning[s.id];
     return cal && cal.freq ? cal.freq : s.openFreq;
   };
-  const simFor = (s) => {
+  // the fingerprint recorded closest to the candidate: exact spot > open string
+  const fpFor = (s, fret) => {
     const cal = tuning && tuning[s.id];
-    return fingerprint && cal && cal.fingerprint ? fingerprintSimilarity(fingerprint, cal.fingerprint) : null;
+    if (!cal) return null;
+    const spot = cal.spots && cal.spots[fret];
+    if (spot && spot.fingerprint) return spot.fingerprint;
+    return cal.fingerprint || null;
   };
   const anyCalibrated = guitarStrings.some((s) => {
     const cal = tuning && tuning[s.id];
-    return cal && cal.fingerprint;
+    return cal && (cal.fingerprint || (cal.spots && Object.keys(cal.spots).length));
   });
   const TIE_BAND = 30; // cents around the best within which timbre decides
+  const UNISON_EPS = 1; // cents: below this, positions are the same pitch → timbre decides
 
-  // gateTimbre: true keeps the TV-block (drop strings whose timbre is clearly not
-  // the calibrated guitar); false is the uncalibrated fallback that matches any string.
+  // gateTimbre: true keeps the TV-block (drop candidates whose timbre is clearly
+  // not the calibrated guitar); false is the uncalibrated fallback (pitch only).
   const search = (fretMin, fretMax, tolerance, gateTimbre) => {
     let best = null;
     guitarStrings.forEach((s) => {
       if (!activeStrings.includes(s.id)) return;
-      const sim = simFor(s);
-      if (gateTimbre && sim !== null && sim < FINGERPRINT_MATCH) return;
       const base = openFreqFor(s);
       for (let fret = fretMin; fret <= fretMax; fret++) {
         const cents = Math.abs(1200 * Math.log2(freq / (base * Math.pow(2, fret / 12))));
         if (cents > tolerance) continue;
+        const fp = fingerprint ? fpFor(s, fret) : null;
+        const dist = fp ? fingerprintDistance(fingerprint, fp) : null;
+        if (gateTimbre && dist !== null && dist > FINGERPRINT_MATCH) continue;
         if (!best || cents < best.cents - TIE_BAND) {
-          best = { stringId: s.id, fret, cents, sim };
+          best = { stringId: s.id, fret, cents, dist };
         } else if (cents <= best.cents + TIE_BAND) {
+          const samePitch = Math.abs(cents - best.cents) <= UNISON_EPS;
           const better =
-            cents < best.cents ||
-            (cents === best.cents && (sim ?? -1) > (best.sim ?? -1)) ||
-            (cents === best.cents && (sim ?? -1) === (best.sim ?? -1) && s.id < best.stringId);
-          if (better) best = { stringId: s.id, fret, cents, sim };
+            cents < best.cents - UNISON_EPS ||
+            (samePitch && (dist ?? Infinity) < (best.dist ?? Infinity)) ||
+            (samePitch && (dist ?? Infinity) === (best.dist ?? Infinity) && s.id < best.stringId);
+          if (better) best = { stringId: s.id, fret, cents, dist };
         }
       }
     });

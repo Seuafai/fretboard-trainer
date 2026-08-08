@@ -1,6 +1,10 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { StatCard } from "./shared.jsx";
-import { STRINGS, centsBetween, timeAgo } from "../theory.js";
+import { STRINGS, centsBetween } from "../theory.js";
+
+// each string needs CAL_PLUCKS steady plucks before its calibration is stored —
+// averaging several plucks gives a robust timbre fingerprint for string detection
+const CAL_PLUCKS = 3;
 
 function TunerGauge({ cents, active }) {
   const clamped = Math.max(-50, Math.min(50, cents ?? 0));
@@ -47,9 +51,23 @@ export default function TunerPage({ mic, tuning, onUpdateTuning, guitarStrings }
   const [detectedString, setDetectedString] = useState(null);
   const [lockProgress, setLockProgress] = useState(0);
   const [justLocked, setJustLocked] = useState(null);
+  const [pluckCount, setPluckCount] = useState({});
   const stableStartRef = useRef(null);
   const captureBufRef = useRef([]);
+  const samplesRef = useRef({}); // stringId -> [{ freq, fingerprint }] from each completed pluck
   const intervalRef = useRef(null);
+
+  // when calibration is wiped (tuning preset changed), forget partial plucks too
+  const prevTuningRef = useRef(tuning);
+  useEffect(() => {
+    const hadData = prevTuningRef.current && Object.keys(prevTuningRef.current).length > 0;
+    const nowEmpty = !tuning || Object.keys(tuning).length === 0;
+    if (hadData && nowEmpty) {
+      samplesRef.current = {};
+      setPluckCount({});
+    }
+    prevTuningRef.current = tuning;
+  }, [tuning]);
 
   useEffect(() => {
     if (mic.status !== "active") return;
@@ -96,11 +114,23 @@ export default function TunerPage({ mic, tuning, onUpdateTuning, guitarStrings }
           const avgFp = [0, 0, 0, 0, 0];
           bufs.forEach((b) => b.fingerprint.forEach((v, i) => (avgFp[i] += v / bufs.length)));
           const avgFreq = bufs.reduce((sum, b) => sum + b.freq, 0) / bufs.length;
-          onUpdateTuning(best.id, { freq: avgFreq, fingerprint: avgFp, tunedAt: Date.now() });
-          setJustLocked(best.id);
+          samplesRef.current[best.id] = samplesRef.current[best.id] || [];
+          samplesRef.current[best.id].push({ freq: avgFreq, fingerprint: avgFp });
+          const count = samplesRef.current[best.id].length;
+          setPluckCount((pc) => ({ ...pc, [best.id]: count }));
           stableStartRef.current = null;
           setLockProgress(0);
           captureBufRef.current = [];
+          if (count >= CAL_PLUCKS) {
+            const all = samplesRef.current[best.id];
+            const fp = [0, 0, 0, 0, 0];
+            all.forEach((sm) => sm.fingerprint.forEach((v, i) => (fp[i] += v / all.length)));
+            const freq = all.reduce((sum, sm) => sum + sm.freq, 0) / all.length;
+            onUpdateTuning(best.id, { freq, fingerprint: fp, tunedAt: Date.now() });
+            samplesRef.current[best.id] = [];
+            setPluckCount((pc) => ({ ...pc, [best.id]: 0 }));
+          }
+          setJustLocked(best.id);
           setTimeout(() => setJustLocked(null), 1400);
         }
       } else {
@@ -138,6 +168,7 @@ export default function TunerPage({ mic, tuning, onUpdateTuning, guitarStrings }
         const StringCard = ({ id }) => {
           const s = guitarStrings.find((x) => x.id === id);
           const data = tuning && tuning[id];
+          const count = pluckCount[id] || 0;
           const isCurrent = detectedString === id;
           const isLocking = isCurrent && lockProgress > 0;
           const isJustLocked = justLocked === id;
@@ -160,7 +191,7 @@ export default function TunerPage({ mic, tuning, onUpdateTuning, guitarStrings }
                 {s.open}
               </div>
               <div style={{ fontSize: 10, color: data ? "#8fbb7f" : "#5a6270", marginTop: 4 }}>
-                {isJustLocked ? "locked ✓" : data ? timeAgo(data.tunedAt) : "not tuned"}
+                {data ? "locked ✓" : count > 0 ? `${count}/${CAL_PLUCKS} · pluck again` : "not tuned"}
               </div>
             </div>
           );
@@ -192,7 +223,7 @@ export default function TunerPage({ mic, tuning, onUpdateTuning, guitarStrings }
       })()}
 
       <p style={{ fontSize: 12, color: "#5a6270", marginTop: 14, textAlign: "center" }}>
-        Play each string and hold it steady — it locks in automatically once it's in tune. Tuned strings teach the app your guitar's exact pitch and timbre, so practice modes recognize only your guitar — a tune on the TV won't count anymore.
+        Pluck each open string in tune <strong>3 times</strong> — the tuner averages the samples for a robust timbre profile. This teaches the app your guitar's exact pitch and timbre, so practice modes recognize only your guitar (a tune on the TV won't count), and Find It can tell which string you're playing even for notes that exist on two strings.
       </p>
     </div>
   );
