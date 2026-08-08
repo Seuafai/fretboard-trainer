@@ -301,41 +301,61 @@ export const FINGERPRINT_MATCH = 0.5;
 export const PITCH_TOLERANCE = 50;
 
 // finds the neck position nearest `freq`. Uses each string's mic-calibrated open
-// frequency when available (so tuning actually sharpens detection), and rejects a
-// string outright when the live timbre doesn't match its stored fingerprint.
+// frequency when available (so tuning actually sharpens detection). Many notes live
+// at the exact same pitch on neighbouring strings (G = string 3 open = string 4
+// fret 5), so when several positions are within a small cents band of the best we
+// break the tie with the string whose calibrated harmonic fingerprint is closest to
+// the live sound. A reading that matches no calibrated string at all is rejected
+// (that's how TV/synth tones are blocked).
 export function nearestPosition(freq, guitarStrings, activeStrings, maxFret, preferredRange, tuning, fingerprint) {
   const openFreqFor = (s) => {
     const cal = tuning && tuning[s.id];
     return cal && cal.freq ? cal.freq : s.openFreq;
   };
-  const timbreOk = (s) => {
+  const simFor = (s) => {
     const cal = tuning && tuning[s.id];
-    if (!fingerprint || !cal || !cal.fingerprint) return true;
-    return fingerprintSimilarity(fingerprint, cal.fingerprint) >= FINGERPRINT_MATCH;
+    return fingerprint && cal && cal.fingerprint ? fingerprintSimilarity(fingerprint, cal.fingerprint) : null;
   };
-  const search = (fretMin, fretMax, tolerance) => {
-    let best = null,
-      bestCents = Infinity;
+  const anyCalibrated = guitarStrings.some((s) => {
+    const cal = tuning && tuning[s.id];
+    return cal && cal.fingerprint;
+  });
+  const TIE_BAND = 30; // cents around the best within which timbre decides
+
+  // gateTimbre: true keeps the TV-block (drop strings whose timbre is clearly not
+  // the calibrated guitar); false is the uncalibrated fallback that matches any string.
+  const search = (fretMin, fretMax, tolerance, gateTimbre) => {
+    let best = null;
     guitarStrings.forEach((s) => {
       if (!activeStrings.includes(s.id)) return;
-      if (!timbreOk(s)) return;
+      const sim = simFor(s);
+      if (gateTimbre && sim !== null && sim < FINGERPRINT_MATCH) return;
       const base = openFreqFor(s);
       for (let fret = fretMin; fret <= fretMax; fret++) {
-        const f = base * Math.pow(2, fret / 12);
-        const cents = Math.abs(1200 * Math.log2(freq / f));
-        if (cents < bestCents) {
-          bestCents = cents;
-          best = { stringId: s.id, fret };
+        const cents = Math.abs(1200 * Math.log2(freq / (base * Math.pow(2, fret / 12))));
+        if (cents > tolerance) continue;
+        if (!best || cents < best.cents - TIE_BAND) {
+          best = { stringId: s.id, fret, cents, sim };
+        } else if (cents <= best.cents + TIE_BAND) {
+          const better =
+            cents < best.cents ||
+            (cents === best.cents && (sim ?? -1) > (best.sim ?? -1)) ||
+            (cents === best.cents && (sim ?? -1) === (best.sim ?? -1) && s.id < best.stringId);
+          if (better) best = { stringId: s.id, fret, cents, sim };
         }
       }
     });
-    return bestCents <= tolerance ? { ...best, cents: bestCents } : null;
+    return best;
   };
+
   if (preferredRange) {
-    const inWindow = search(preferredRange.start, preferredRange.end, 35);
+    const inWindow = search(preferredRange.start, preferredRange.end, 35, true);
     if (inWindow) return inWindow;
   }
-  return search(0, maxFret, PITCH_TOLERANCE);
+  const gated = search(0, maxFret, PITCH_TOLERANCE, true);
+  if (gated) return gated;
+  if (anyCalibrated) return null; // notes are playing but none match our guitar's timbre
+  return search(0, maxFret, PITCH_TOLERANCE, false); // nothing calibrated → match by pitch alone
 }
 
 // full gate for a mic sample in the practice modes: the signal must be confident
