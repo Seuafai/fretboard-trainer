@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 // time-domain autocorrelation pitch detector with the classic McLeod-style
 // trim + parabolic interpolation. Returns freq, clarity (0..1) and rms.
-function autoCorrelate(buf, sampleRate) {
+export function autoCorrelate(buf, sampleRate) {
   const SIZE = buf.length;
   let rms = 0;
   for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
@@ -53,14 +53,16 @@ function autoCorrelate(buf, sampleRate) {
   if (a) T0 = maxPos - b / (2 * a);
   const freq = sampleRate / T0;
   const clarity = c[0] ? maxVal / c[0] : 0;
-  if (freq < 55 || freq > 900) return { freq: null, clarity: 0, rms };
+  // cap covers the whole 24-fret neck: high-e fret 24 ≈ 1319 Hz. Fundamentals above
+  // this are ignored on purpose (we only want notes actually on the neck).
+  if (freq < 55 || freq > 1400) return { freq: null, clarity: 0, rms };
   return { freq, clarity, rms };
 }
 
 // harmonic profile of a tone: the amplitudes of harmonics 2..6 relative to the
 // fundamental. Guitar strings have a recognizable decay shape here; synthesised
 // tones (a TV, a beep) don't, which is how we tell them apart.
-function extractFingerprint(freqBytes, f0, sampleRate, fftSize) {
+export function extractFingerprint(freqBytes, f0, sampleRate, fftSize) {
   const binHz = sampleRate / fftSize;
   const ampAt = (f) => {
     const bin = Math.round(f / binHz);

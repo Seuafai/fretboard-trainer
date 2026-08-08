@@ -117,7 +117,7 @@ export default function ScalesMode({ mic, maxFret, activeStrings, guitarStrings,
       triggerFlash(pos.stringId, pos.fret, "#7cb37a", 1800);
       setFoundNotes((prev) => (prev.includes(name) ? prev : [...prev, name]));
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, 110);
+    }, 50);
     return () => {
       clearInterval(intervalRef.current);
       clearTimeout(flashTimeoutRef.current);

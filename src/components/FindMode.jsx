@@ -3,7 +3,11 @@ import { StatCard } from "./shared.jsx";
 import FretboardSVG from "./FretboardSVG.jsx";
 import { CHROMATIC, displayName, freqToNote, matchReading } from "../theory.js";
 
+// note patterns repeat every octave, so Find It only needs one octave of the neck
+const FIND_FRETS = 12;
+
 export default function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune, guitarStrings }) {
+  const neckMax = Math.min(maxFret, FIND_FRETS);
   const [note, setNote] = useState(() => CHROMATIC[Math.floor(Math.random() * 12)]);
   const [reading, setReading] = useState(null);
   const [flash, setFlash] = useState(null); // { stringId, fret, color } — temporary, auto-clears
@@ -28,7 +32,7 @@ export default function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune
       setReading({ name });
       const now = Date.now();
       // only confident, in-tune, guitar-timbre sounds count — see matchReading
-      const pos = matchReading(s, { guitarStrings, activeStrings, maxFret, tuning });
+      const pos = matchReading(s, { guitarStrings, activeStrings, maxFret: neckMax, tuning });
       if (!pos) return;
 
       if (name !== note) {
@@ -41,13 +45,13 @@ export default function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune
       lastMatchRef.current = now;
       triggerFlash(pos.stringId, pos.fret, "#7cb37a", 1800);
       setCorrectCount((c) => c + 1);
-    }, 110);
+    }, 50);
     return () => {
       clearInterval(intervalRef.current);
       clearTimeout(flashTimeoutRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mic.status, note, guitarStrings, activeStrings, maxFret, tuning]);
+  }, [mic.status, note, guitarStrings, activeStrings, neckMax, tuning]);
 
   const tunedCount = guitarStrings.filter((s) => tuning && tuning[s.id]).length;
   const markers = flash ? [{ stringId: flash.stringId, fret: flash.fret, filled: true, color: flash.color }] : [];
@@ -78,12 +82,12 @@ export default function FindMode({ mic, maxFret, activeStrings, tuning, onGoTune
       )}
 
       <div style={{ marginBottom: 14 }}>
-        <FretboardSVG maxFret={maxFret} activeStrings={activeStrings} markers={markers} pulse={flash} guitarStrings={guitarStrings} />
+        <FretboardSVG maxFret={neckMax} activeStrings={activeStrings} markers={markers} pulse={flash} guitarStrings={guitarStrings} />
       </div>
 
       <div style={{ textAlign: "center", marginBottom: 18, minHeight: 40 }}>
         <div style={{ fontSize: 14, color: "#9aa2ac" }}>
-          Play <strong style={{ color: "#f3ead9" }}>{displayName(note)}</strong> anywhere on the neck — any string, any octave, as many times as you like.
+          Play <strong style={{ color: "#f3ead9" }}>{displayName(note)}</strong> anywhere in frets 0–12 — any string, as many times as you like.
         </div>
       </div>
 
