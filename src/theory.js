@@ -30,79 +30,27 @@ export const TUNING_PRESETS = [
 // semitone intervals from the root, ascending within one octave (root is added again at the top)
 export const SCALE_PATTERNS = [
   { id: "major", label: "Major (Ionian)", intervals: [0, 2, 4, 5, 7, 9, 11] },
+  { id: "majorPent", label: "Pentatonic (Major)", intervals: [0, 2, 4, 7, 9] },
+  { id: "majorBlues", label: "Blues (Major)", intervals: [0, 2, 3, 4, 7, 9] },
+  { id: "majorFlat7", label: "Major + ♭7", intervals: [0, 2, 4, 5, 7, 9, 10] },
+  { id: "minor", label: "Minor (Aeolian)", intervals: [0, 2, 3, 5, 7, 8, 10] },
+  { id: "minorPent", label: "Pentatonic (Minor)", intervals: [0, 3, 5, 7, 10] },
+  { id: "blues", label: "Blues (Minor)", intervals: [0, 3, 5, 6, 7, 10] },
+  { id: "arpMajor", label: "Arpeggio (Major)", intervals: [0, 4, 7] },
+  { id: "arpMaj7", label: "Arpeggio (Major 7th)", intervals: [0, 4, 7, 11] },
+  { id: "arpDom7", label: "Arpeggio (Dominant 7th)", intervals: [0, 4, 7, 10] },
+  { id: "arpMinor", label: "Arpeggio (Minor)", intervals: [0, 3, 7] },
+  { id: "arpMin7", label: "Arpeggio (Minor 7th)", intervals: [0, 3, 7, 10] },
+  { id: "arpDim", label: "Arpeggio (Diminished)", intervals: [0, 3, 6] },
+  { id: "arpAug", label: "Arpeggio (Augmented)", intervals: [0, 4, 8] },
+  { id: "harmonicMinor", label: "Harmonic Minor", intervals: [0, 2, 3, 5, 7, 8, 11] },
   { id: "dorian", label: "Dorian", intervals: [0, 2, 3, 5, 7, 9, 10] },
   { id: "phrygian", label: "Phrygian", intervals: [0, 1, 3, 5, 7, 8, 10] },
   { id: "lydian", label: "Lydian", intervals: [0, 2, 4, 6, 7, 9, 11] },
   { id: "mixolydian", label: "Mixolydian", intervals: [0, 2, 4, 5, 7, 9, 10] },
-  { id: "minor", label: "Natural Minor (Aeolian)", intervals: [0, 2, 3, 5, 7, 8, 10] },
   { id: "locrian", label: "Locrian", intervals: [0, 1, 3, 5, 6, 8, 10] },
-  { id: "harmonicMinor", label: "Harmonic Minor", intervals: [0, 2, 3, 5, 7, 8, 11] },
-  { id: "melodicMinor", label: "Melodic Minor", intervals: [0, 2, 3, 5, 7, 9, 11] },
-  { id: "majorPent", label: "Major Pentatonic", intervals: [0, 2, 4, 7, 9] },
-  { id: "minorPent", label: "Minor Pentatonic", intervals: [0, 3, 5, 7, 10] },
-  { id: "blues", label: "Blues", intervals: [0, 3, 5, 6, 7, 10] },
+  { id: "chromatic", label: "Chromatic", intervals: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] },
 ];
-
-// the seven modes of the major scale, in position order (position N starts on degree N)
-export const MODE_NAMES = ["Ionian", "Dorian", "Phrygian", "Lydian", "Mixolydian", "Aeolian", "Locrian"];
-
-// The classic CAGED major-scale boxes — five overlapping shapes named after their chord form.
-// `strings` holds per-string fret numbers for G major (key root G, tonic fret on the anchor
-// string in `anchorFret`). Each box transposes to any key by shifting so the key's root lands
-// on the anchor string; every placed note is then pitch-class-checked against the major scale.
-export const CAGED_FORMS = [
-  {
-    id: "E",
-    label: "E form",
-    anchorString: "e2",
-    anchorFret: 3,
-    strings: { e1: [2, 3, 5], B: [3, 5], G: [2, 4, 5], D: [2, 4, 5], A: [2, 3, 5], e2: [2, 3, 5] },
-  },
-  {
-    id: "D",
-    label: "D form",
-    anchorString: "D",
-    anchorFret: 5,
-    strings: { e1: [5, 7, 8], B: [5, 7, 8], G: [4, 5, 7], D: [4, 5, 7], A: [5, 7], e2: [5, 7, 8] },
-  },
-  {
-    id: "C",
-    label: "C form",
-    anchorString: "A",
-    anchorFret: 10,
-    strings: { e1: [7, 8, 10], B: [7, 8, 10], G: [7, 9], D: [7, 9, 10], A: [7, 9, 10], e2: [7, 8, 10] },
-  },
-  {
-    id: "A",
-    label: "A form",
-    anchorString: "A",
-    anchorFret: 10,
-    strings: { e1: [10, 12], B: [10, 12, 13], G: [9, 11, 12], D: [9, 10, 12], A: [9, 10, 12], e2: [10, 12] },
-  },
-  {
-    id: "G",
-    label: "G form",
-    anchorString: "e2",
-    anchorFret: 15,
-    strings: { e1: [12, 14, 15], B: [12, 13, 15], G: [11, 12, 14], D: [12, 14], A: [12, 14, 15], e2: [12, 14, 15] },
-  },
-];
-
-// selectable pattern systems; each defines its own position-building strategy and the
-// scales it applies to. `allowedScales` = null means every scale works with it.
-export const PATTERN_SYSTEMS = [
-  { id: "modes3nps", label: "Modes / 3NPS", defaultScale: "major", allowedScales: null },
-  { id: "caged", label: "CAGED boxes", defaultScale: "major", allowedScales: ["major"] },
-  { id: "penta", label: "Pentatonic boxes", defaultScale: "minorPent", allowedScales: ["majorPent", "minorPent"] },
-  { id: "blues", label: "Blues boxes", defaultScale: "blues", allowedScales: ["blues"] },
-  { id: "twoOctave", label: "Two-octave", defaultScale: "major", allowedScales: null },
-];
-
-export function systemAllowsScale(systemId, scaleId) {
-  const sys = PATTERN_SYSTEMS.find((s) => s.id === systemId);
-  if (!sys || !sys.allowedScales) return true;
-  return sys.allowedScales.includes(scaleId);
-}
 
 // shifts a standard-tuning reference frequency to a different note, picking the
 // nearest direction around the chromatic circle (correct for all alt-tuning shifts, which are small)
@@ -407,19 +355,17 @@ export function matchReading(s, { guitarStrings, activeStrings, maxFret, tuning,
 // G->B break (4 semitones); the drift between strings is exactly the scale distance of `nps`
 // degrees minus the tuning offset, which is what produces the textbook boxes.
 export function buildScalePositions(rootIdx, scale, maxFret, guitarStrings) {
+  // the walk assumes strings are ordered low to high (index 0 = the low-E anchor string);
+  // sort internally so the builders work with any input order
+  const strings = guitarStrings
+    .map((s, i) => ({ s, i }))
+    .sort((a, b) => (a.s.openFreq ?? a.i) - (b.s.openFreq ?? b.i))
+    .map(({ s }) => s);
   const intervals = scale.intervals;
   const N = intervals.length;
-  const nps = N === 5 || N === 6 ? 2 : 3;
-  const strings = [...guitarStrings].reverse(); // low E first
+  const nps = N <= 6 ? 2 : 3;
   const pcs = intervals.map((iv) => CHROMATIC[((rootIdx + iv) % 12 + 12) % 12]);
   const semisOf = (k) => intervals[k % N] + 12 * Math.floor(k / N);
-
-  const tuningOffsets = [];
-  for (let i = 0; i < strings.length - 1; i++) {
-    const a = CHROMATIC.indexOf(strings[i].open);
-    const b = CHROMATIC.indexOf(strings[i + 1].open);
-    tuningOffsets.push((((b - a) % 12) + 12) % 12);
-  }
 
   const occ = strings.map((s) => {
     const map = {};
@@ -430,29 +376,32 @@ export function buildScalePositions(rootIdx, scale, maxFret, guitarStrings) {
     return map;
   });
 
-  // nearest occurrence to `target`, but only within half an octave so we can't
-  // accidentally jump to the wrong octave's occurrence (pcs repeat every 12 frets)
-  const pick = (list, target) => {
+  // the first note of a string's group is placed near the anchor fret (the position's
+  // low-E root), keeping the whole position compact — the classic 3NPS / pentatonic
+  // boxes. The remaining notes follow the scale upward 1-2 frets per step.
+  const pickGroupStart = (strOcc, degIdx, anchorFret) => {
+    const list = strOcc[pcs[degIdx % N]];
     if (!list) return null;
     let best = null;
     for (const f of list) {
-      if (Math.abs(f - target) > 6) continue;
-      if (best === null || Math.abs(f - target) < Math.abs(best - target)) best = f;
+      if (Math.abs(f - anchorFret) > 4) continue;
+      if (best === null || Math.abs(f - anchorFret) < Math.abs(best - anchorFret)) best = f;
     }
     return best;
   };
 
   const positions = [];
   for (let p = 0; p < N; p++) {
+    // anchor: lowest fret on the low-E string that is this scale degree and lets the
+    // whole shape fit within the neck
     const anchors = occ[0][pcs[p]] || [];
     let built = null;
     for (const anchor of anchors) {
       const notes = [];
-      let startFret = anchor;
       let ok = true;
       for (let i = 0; i < strings.length; i++) {
         const baseIdx = p + nps * i;
-        const firstFret = pick(occ[i][pcs[baseIdx % N]], startFret);
+        const firstFret = pickGroupStart(occ[i], baseIdx, anchor);
         if (firstFret === null) {
           ok = false;
           break;
@@ -462,7 +411,11 @@ export function buildScalePositions(rootIdx, scale, maxFret, guitarStrings) {
         for (let j = 1; j < nps; j++) {
           const absIdx = baseIdx + j;
           const expected = prevFret + (semisOf(absIdx) - semisOf(baseIdx + j - 1));
-          const fret = pick(occ[i][pcs[absIdx % N]], expected);
+          const list = occ[i][pcs[absIdx % N]];
+          let fret = null;
+          for (const f of list) {
+            if (Math.abs(f - expected) <= 1 && (fret === null || Math.abs(f - expected) < Math.abs(fret - expected))) fret = f;
+          }
           if (fret === null) {
             ok = false;
             break;
@@ -471,9 +424,6 @@ export function buildScalePositions(rootIdx, scale, maxFret, guitarStrings) {
           prevFret = fret;
         }
         if (!ok) break;
-        if (i < strings.length - 1) {
-          startFret = firstFret + (semisOf(baseIdx + nps) - semisOf(baseIdx) - tuningOffsets[i]);
-        }
       }
       if (ok) {
         const frets = notes.map((n) => n.fret);
@@ -486,15 +436,157 @@ export function buildScalePositions(rootIdx, scale, maxFret, guitarStrings) {
   return positions;
 }
 
-// builds the five classic CAGED boxes for the selected root. The shapes are stored as fret
-// positions for G major; transposing shifts the whole rigid shape so the key's root lands on
-// the form's anchor string. Each occurrence of the root on the anchor string is tried, nearest
-// to the shape's natural position first, until one fits within the neck; every placed note is
-// then pitch-class-checked against the major scale so any data slip fails fast.
-export function buildCagedPositions(rootIdx, maxFret, guitarStrings) {
-  const major = SCALE_PATTERNS.find((s) => s.id === "major");
-  const pcs = major.intervals.map((iv) => CHROMATIC[((rootIdx + iv) % 12 + 12) % 12]);
-  const rootName = CHROMATIC[rootIdx];
+// ---------- pattern families ----------
+
+// The classic CAGED major-scale boxes — five overlapping shapes named after their chord form.
+// `strings` holds per-string fret numbers for G major (key root G, tonic fret on the anchor
+// string in `anchorFret`). Each box transposes to any key by shifting so the key's root lands
+// on the anchor string; every placed note is then pitch-class-checked against the major scale.
+const CAGED_FORMS = [
+  {
+    id: "E",
+    label: "E form",
+    anchorString: "e2",
+    anchorFret: 3,
+    strings: { e1: [2, 3, 5], B: [3, 5], G: [2, 4, 5], D: [2, 4, 5], A: [2, 3, 5], e2: [2, 3, 5] },
+  },
+  {
+    id: "D",
+    label: "D form",
+    anchorString: "D",
+    anchorFret: 5,
+    strings: { e1: [5, 7, 8], B: [5, 7, 8], G: [4, 5, 7], D: [4, 5, 7], A: [5, 7], e2: [5, 7, 8] },
+  },
+  {
+    id: "C",
+    label: "C form",
+    anchorString: "A",
+    anchorFret: 10,
+    strings: { e1: [7, 8, 10], B: [7, 8, 10], G: [7, 9], D: [7, 9, 10], A: [7, 9, 10], e2: [7, 8, 10] },
+  },
+  {
+    id: "A",
+    label: "A form",
+    anchorString: "A",
+    anchorFret: 10,
+    strings: { e1: [10, 12], B: [10, 12, 13], G: [9, 11, 12], D: [9, 10, 12], A: [9, 10, 12], e2: [10, 12] },
+  },
+  {
+    id: "G",
+    label: "G form",
+    anchorString: "e2",
+    anchorFret: 15,
+    strings: { e1: [12, 14, 15], B: [12, 13, 15], G: [11, 12, 14], D: [12, 14], A: [12, 14, 15], e2: [12, 14, 15] },
+  },
+];
+
+// The CAGED forms are the G-major fingerings, so a scale whose note spacing differs from
+// major (e.g. harmonic minor's augmented 2nd ♭6→7) can leave some of its tones sitting
+// just outside every transposed box. Complete each box by pulling in each missing scale
+// tone where the scale's own step geometry puts it — continuing a string's existing
+// consecutive run (root-2nd-♭3 on the low E, say) ahead of filling a gap — rather than
+// just the nearest empty fret. Never a 3-note span covering 5+ frets. This is a no-op for
+// scales whose boxes are already complete (major and the modal scales).
+function completeScalePosition(position, scalePcs, maxFret, guitarStrings) {
+  const present = new Set(position.notes.map((n) => n.degree));
+  const missing = [];
+  for (let d = 0; d < scalePcs.length; d++) if (!present.has(d)) missing.push(d);
+  if (!missing.length) return position;
+
+  const order = new Map(guitarStrings.map((s, i) => [s.id, i]));
+  const N = scalePcs.length;
+  const rootPc = CHROMATIC.indexOf(scalePcs[0]);
+  const semis = scalePcs.map((pc) => (CHROMATIC.indexOf(pc) - rootPc + 12) % 12);
+  const notes = position.notes.map((n) => ({ ...n }));
+  const byString = {};
+  for (const n of notes) (byString[n.stringId] = byString[n.stringId] || []).push(n);
+
+  for (const deg of missing) {
+    const pc = scalePcs[deg];
+    let pick = null;
+    let cands = null;
+    for (const [ws, we] of [
+      [position.start - 1, position.end + 1],
+      [position.start - 2, position.end + 2],
+      [position.start - 3, position.end + 3],
+    ]) {
+      cands = [];
+      for (const s of guitarStrings) {
+        const placed = byString[s.id] || [];
+        if (placed.length >= 4) continue; // hard cap: never 5 notes on a string
+        const placedDegs = new Set(placed.map((n) => n.degree));
+        const hasPrev = placedDegs.has((deg - 1 + N) % N);
+        const hasNext = placedDegs.has((deg + 1) % N);
+        const cur = placed.map((n) => n.fret);
+        for (let f = Math.max(0, ws); f <= Math.min(maxFret, we); f++) {
+          if (cur.includes(f)) continue;
+          if (noteAt(s.open, f) !== pc) continue;
+          // does this fret continue the string's scale run from a neighbouring degree?
+          let aligned = false;
+          for (const n of placed) {
+            const pred = n.fret + semis[deg] - semis[n.degree];
+            const oct = Math.round((f - pred) / 12) * 12;
+            if (pred + oct === f) {
+              aligned = true;
+              break;
+            }
+          }
+          const test = cur.concat(f).sort((a, b) => a - b);
+          let wide = false;
+          for (let i = 0; i + 2 < test.length; i++) {
+            if (test[i + 2] - test[i] >= 5) {
+              wide = true;
+              break;
+            }
+          }
+          if (wide) continue;
+          // preference: extend a consecutive run > fill a gap > sit beside a degree
+          const score = !hasPrev && !hasNext ? 4 : hasPrev && !hasNext ? 1 : hasPrev && hasNext ? 2 : 3;
+          cands.push({ stringId: s.id, fret: f, score: aligned ? score : score + 5, aligned });
+        }
+      }
+      if (!cands.length) continue;
+      cands.sort(
+        (a, b) => a.score - b.score || a.fret - b.fret || (order.get(a.stringId) ?? 0) - (order.get(b.stringId) ?? 0)
+      );
+      pick = cands[0];
+      break;
+    }
+    if (!pick) continue;
+    notes.push({ stringId: pick.stringId, fret: pick.fret, degree: deg });
+    (byString[pick.stringId] = byString[pick.stringId] || []).push({ stringId: pick.stringId, fret: pick.fret, degree: deg });
+    // the classic shapes mirror across the two E strings (both carry the same run, e.g. the
+    // R-2-♭3 on Shape 1). When the best placement is on one E string and its mirror has the
+    // identical aligned spot, complete both instead of picking one.
+    const mirror = pick.stringId === "e1" ? "e2" : pick.stringId === "e2" ? "e1" : null;
+    if (mirror && cands) {
+      const m = cands.find((c) => c.stringId === mirror && c.fret === pick.fret);
+      if (m) {
+        notes.push({ stringId: m.stringId, fret: m.fret, degree: deg });
+        (byString[m.stringId] = byString[m.stringId] || []).push({ stringId: m.stringId, fret: m.fret, degree: deg });
+      }
+    }
+  }
+  notes.sort((a, b) => (order.get(a.stringId) ?? 0) - (order.get(b.stringId) ?? 0) || a.fret - b.fret);
+  const frets = notes.map((n) => n.fret);
+  return { ...position, notes, start: Math.min(...frets), end: Math.max(...frets) };
+}
+
+// builds the five classic CAGED boxes for the selected root and scale. The shapes are stored
+// as fret positions for G major; transposing shifts the whole rigid shape so the key's root
+// lands on the form's anchor string. Each occurrence of the root on the anchor string is
+// tried, lowest on the neck first (so open-position and first-position shapes are found
+// before their higher repetitions), until one fits within the neck. Only notes whose pitch
+// class is in the scale are kept — for the major scale this is every note
+// of the classic CAGED positions; for other scales it is the same textbook boxes containing
+// that scale's tones.
+//
+// `positionRootIdx` lets a scale's shapes be anchored to a different root than the one used
+// for pitch-class/degree labelling: the modes anchor to their relative major, whose boxes
+// contain every one of the seven modal tones. Defaults to the scale root.
+export function buildCagedPositions(rootIdx, scale, maxFret, guitarStrings, positionRootIdx = rootIdx) {
+  const pcs = scale.intervals.map((iv) => CHROMATIC[((rootIdx + iv) % 12 + 12) % 12]);
+  const rootName = CHROMATIC[positionRootIdx];
   const positions = [];
   for (const form of CAGED_FORMS) {
     const anchor = guitarStrings.find((s) => s.id === form.anchorString);
@@ -503,7 +595,7 @@ export function buildCagedPositions(rootIdx, maxFret, guitarStrings) {
     for (let f = 0; f <= maxFret; f++) {
       if (noteAt(anchor.open, f) === rootName) anchors.push(f);
     }
-    anchors.sort((a, b) => Math.abs(a - form.anchorFret) - Math.abs(b - form.anchorFret));
+    anchors.sort((a, b) => a - b); // lowest (open-position) anchor first
     let built = null;
     for (const anchorFret of anchors) {
       const shift = anchorFret - form.anchorFret;
@@ -523,10 +615,7 @@ export function buildCagedPositions(rootIdx, maxFret, guitarStrings) {
           }
           const pc = noteAt(s.open, fret);
           const deg = pcs.indexOf(pc);
-          if (deg === -1) {
-            ok = false;
-            break;
-          }
+          if (deg === -1) continue; // not a scale tone — drop it, don't fail the shape
           notes.push({ stringId: sid, fret, degree: deg });
         }
         if (!ok) break;
@@ -539,6 +628,140 @@ export function buildCagedPositions(rootIdx, maxFret, guitarStrings) {
         notes,
         start: Math.min(...frets),
         end: Math.max(...frets),
+        labelNote: CHROMATIC[rootIdx],
+      };
+      break;
+    }
+    if (built) positions.push(completeScalePosition(built, pcs, maxFret, guitarStrings));
+  }
+  return positions;
+}
+
+// blues boxes: the classic pentatonic boxes with the blue note added where it falls
+// inside each box (♭5 for minor blues, ♭3 for major blues). This keeps every box a
+// compact 2-notes-per-string shape instead of a stretched walk. Every note carries its
+// degree in the six-note blues scale (not the pentatonic parent).
+export function buildBluesBoxes(rootIdx, scale, maxFret, guitarStrings) {
+  const isMajorBlues = scale.id === "majorBlues";
+  const pentaId = isMajorBlues ? "majorPent" : "minorPent";
+  const blueIv = isMajorBlues ? 3 : 6;
+  const penta = SCALE_PATTERNS.find((s) => s.id === pentaId);
+  const bluesPcs = scale.intervals.map((iv) => CHROMATIC[((rootIdx + iv) % 12 + 12) % 12]);
+  const bluePc = CHROMATIC[((rootIdx + blueIv) % 12 + 12) % 12];
+  const blueDeg = scale.intervals.indexOf(blueIv);
+  const openOf = new Map(guitarStrings.map((s) => [s.id, s.open]));
+  const boxes = buildScalePositions(rootIdx, penta, maxFret, guitarStrings);
+  return boxes.map((box, i) => {
+    const notes = box.notes.map((n) => ({ ...n, degree: bluesPcs.indexOf(noteAt(openOf.get(n.stringId), n.fret)) }));
+    const spanStart = box.start - 1;
+    const spanEnd = box.end + 1;
+    for (const s of guitarStrings) {
+      const strHasNotes = notes.some((n) => n.stringId === s.id);
+      if (!strHasNotes) continue;
+      for (let f = spanStart; f <= spanEnd; f++) {
+        if (f < 0 || f > maxFret) continue;
+        if (noteAt(s.open, f) === bluePc && !notes.some((n) => n.stringId === s.id && n.fret === f)) {
+          notes.push({ stringId: s.id, fret: f, degree: blueDeg });
+        }
+      }
+    }
+    notes.sort((a, b) => a.stringId === b.stringId ? a.fret - b.fret : 0);
+    const frets = notes.map((n) => n.fret);
+    return { ...box, id: `blues-${i}`, notes, start: Math.min(...frets), end: Math.max(...frets) };
+  });
+}
+
+// compact arpeggio shapes: reuse the five CAGED chord-form shapes, transposing each to the
+// selected root and keeping the notes that are arpeggio tones (root, 3rd, 5th, [7th]). The
+// chord forms are major triads, so the ♭3/♭7 of a minor or dominant arpeggio never appear in
+// the raw shape — we pull them in from the notes that sit just inside the form's box so every
+// arpeggio shape is complete. Every resulting shape is one of the classic chord-shaped
+// arpeggios, so no string ever carries 3 notes covering 5+ frets — satisfying the
+// "no wide spreads" preference.
+export function buildArpeggioPositions(rootIdx, scale, maxFret, guitarStrings) {
+  const pcs = scale.intervals.map((iv) => CHROMATIC[((rootIdx + iv) % 12 + 12) % 12]);
+  const rootName = CHROMATIC[rootIdx];
+  const positions = [];
+  for (const form of CAGED_FORMS) {
+    const anchor = guitarStrings.find((s) => s.id === form.anchorString);
+    if (!anchor) continue;
+    const anchors = [];
+    for (let f = 0; f <= maxFret; f++) {
+      if (noteAt(anchor.open, f) === rootName) anchors.push(f);
+    }
+    anchors.sort((a, b) => a - b); // lowest (open-position) anchor first
+    let built = null;
+    for (const anchorFret of anchors) {
+      const shift = anchorFret - form.anchorFret;
+      const notes = [];
+      let ok = true;
+      let minRaw = Infinity;
+      let maxRaw = -Infinity;
+      for (const [sid, frets] of Object.entries(form.strings)) {
+        const s = guitarStrings.find((gs) => gs.id === sid);
+        if (!s) {
+          ok = false;
+          break;
+        }
+        for (const f of frets) {
+          const fret = f + shift;
+          if (fret < 0 || fret > maxFret) {
+            ok = false;
+            break;
+          }
+          if (fret < minRaw) minRaw = fret;
+          if (fret > maxRaw) maxRaw = fret;
+          const pc = noteAt(s.open, fret);
+          const deg = pcs.indexOf(pc);
+          if (deg === -1) continue; // not an arpeggio tone — skip, don't fail
+          notes.push({ stringId: sid, fret, degree: deg });
+        }
+        if (!ok) break;
+      }
+      if (!ok) continue;
+      // complete the shape: any arpeggio tone sitting just inside the form's box
+      // (e.g. the ♭3 of a minor chord or the 7th of a 7th chord) that the raw
+      // major-triad shape doesn't contain. A tone is only kept when it doesn't give
+      // a string 3 notes covering 5+ frets (the "no wide spreads" invariant).
+      const order = new Map(guitarStrings.map((s, i) => [s.id, i]));
+      const byString = {};
+      for (const n of notes) (byString[n.stringId] = byString[n.stringId] || []).push({ ...n });
+      const finalNotes = [];
+      for (const s of guitarStrings) {
+        const core = (byString[s.id] || []).slice().sort((a, b) => a.fret - b.fret);
+        const kept = core.map((n) => n.fret);
+        const cands = [];
+        for (let f = Math.max(0, minRaw - 1); f <= Math.min(maxFret, maxRaw + 1); f++) {
+          if (kept.includes(f)) continue;
+          const pc = noteAt(s.open, f);
+          const deg = pcs.indexOf(pc);
+          if (deg !== -1) cands.push({ fret: f, degree: deg });
+        }
+        cands.sort((a, b) => a.fret - b.fret);
+        for (const c of cands) {
+          const test = kept.concat(c.fret).sort((a, b) => a - b);
+          let wide = false;
+          for (let i = 0; i + 2 < test.length; i++) {
+            if (test[i + 2] - test[i] >= 5) {
+              wide = true;
+              break;
+            }
+          }
+          if (!wide) kept.push(c.fret);
+        }
+        const set = new Map(core.map((n) => [n.fret, n]));
+        for (const f of kept) {
+          finalNotes.push(set.get(f) || { stringId: s.id, fret: f, degree: pcs.indexOf(noteAt(s.open, f)) });
+        }
+      }
+      finalNotes.sort((a, b) => (order.get(a.stringId) ?? 0) - (order.get(b.stringId) ?? 0) || a.fret - b.fret);
+      const frets = finalNotes.map((n) => n.fret);
+      built = {
+        id: form.id,
+        label: form.label,
+        notes: finalNotes,
+        start: Math.min(...frets),
+        end: Math.max(...frets),
         labelNote: rootName,
       };
       break;
@@ -548,106 +771,195 @@ export function buildCagedPositions(rootIdx, maxFret, guitarStrings) {
   return positions;
 }
 
-// two-octave scale shapes: start on the root of the 6th or 5th string and walk the scale
-// upward three notes per string, stopping exactly at the root two octaves up. Produces the
-// classic "two octave scale" shapes (root on low E, root on A).
-export function buildTwoOctavePositions(rootIdx, scale, maxFret, guitarStrings) {
-  const intervals = scale.intervals;
-  const N = intervals.length;
-  const strings = [...guitarStrings].reverse(); // low E first
-  const pcs = intervals.map((iv) => CHROMATIC[((rootIdx + iv) % 12 + 12) % 12]);
-  const semisOf = (k) => intervals[k % N] + 12 * Math.floor(k / N);
 
-  const tuningOffsets = [];
-  for (let i = 0; i < strings.length - 1; i++) {
-    const a = CHROMATIC.indexOf(strings[i].open);
-    const b = CHROMATIC.indexOf(strings[i + 1].open);
-    tuningOffsets.push((((b - a) % 12) + 12) % 12);
-  }
+// the single set of textbook scale shapes shown in the Scales → Patterns tab. Every scale
+// gets its classic five shapes, numbered Shape 1..5 in the UI:
+//  - 7-note scales (major, modes, harmonic minor): the five CAGED positions. The modes
+//    anchor to their relative major (A Dorian = the G major positions), so every box
+//    contains all seven scale tones instead of leaving some out.
+//  - pentatonic: the five classic boxes
+//  - blues: the five blues boxes (pentatonic + blue note)
+//  - arpeggios: the five chord-shaped arpeggios
+// Invariant: on any string, 3 notes are allowed but never span 5+ frets.
 
-  const occ = strings.map((s) => {
-    const map = {};
-    for (let f = 0; f <= maxFret; f++) {
-      const n = noteAt(s.open, f);
-      (map[n] = map[n] || []).push(f);
-    }
-    return map;
-  });
+// semitones from a modal root up to its relative major's root (0 = the scale is its own major)
+const MODE_TO_MAJOR_OFFSET = {
+  majorFlat7: 7, // mixolydian
+  minor: 9, // aeolian
+  dorian: 2,
+  phrygian: 4,
+  lydian: 5,
+  mixolydian: 7,
+  locrian: 11,
+};
 
-  const pick = (list, target) => {
-    if (!list) return null;
-    let best = null;
-    for (const f of list) {
-      if (Math.abs(f - target) > 6) continue;
-      if (best === null || Math.abs(f - target) < Math.abs(best - target)) best = f;
-    }
-    return best;
-  };
+// The five classic harmonic minor positions, built exactly like the aeolian (natural minor)
+// boxes: the same CAGED positions the app uses for natural minor, with the ♭7 raised to the
+// leading tone (7) and each box completed with its full runs of scale tones. Shape 1 starts
+// on the root of the low E string, and every position contains all seven notes of the scale.
+// Each layout lists, per string, the scale degrees that belong to it in ascending fret
+// order; frets are derived from the root's position on the form's anchor string.
+const HARMONIC_MINOR_SHAPES = [
+  {
+    id: "E",
+    label: "Position 1",
+    rootString: "e2",
+    layout: { e2: [0, 1, 2], A: [3, 4, 5], D: [6, 0], G: [1, 2, 3], B: [4, 5, 6], e1: [0, 1, 2] },
+  },
+  {
+    id: "D",
+    label: "Position 2",
+    rootString: "D",
+    layout: { e2: [1, 2, 3], A: [4, 5, 6], D: [0, 1, 2], G: [3, 4, 5], B: [6, 0], e1: [1, 2, 3] },
+  },
+  {
+    id: "C",
+    label: "Position 3",
+    rootString: "A",
+    layout: { e2: [3, 4, 5], A: [6, 0], D: [1, 2, 3], G: [4, 5, 6], B: [0, 1, 2], e1: [3, 4, 5] },
+  },
+  {
+    id: "A",
+    label: "Position 4",
+    rootString: "A",
+    layout: { e2: [4, 5, 6], A: [0, 1, 2], D: [3, 4, 5], G: [6, 0, 1], B: [1, 2, 3], e1: [4, 5, 6] },
+  },
+  {
+    id: "G",
+    label: "Position 5",
+    rootString: "G",
+    layout: { e2: [6, 0], A: [1, 2, 3], D: [4, 5, 6], G: [0, 1, 2], B: [3, 4, 5], e1: [6, 0] },
+  },
+];
 
+export function buildHarmonicMinorPositions(rootIdx, scale, maxFret, guitarStrings) {
+  const pcs = scale.intervals.map((iv) => CHROMATIC[((rootIdx + iv) % 12 + 12) % 12]);
+  const rootPc = pcs[0];
   const positions = [];
-  for (let anchorIdx = 0; anchorIdx <= 1; anchorIdx++) {
-    const rootFrets = occ[anchorIdx][pcs[0]] || [];
-    for (const startFret of rootFrets) {
+  for (const form of HARMONIC_MINOR_SHAPES) {
+    const anchor = guitarStrings.find((s) => s.id === form.rootString);
+    if (!anchor) continue;
+    const anchors = [];
+    for (let f = 0; f <= maxFret; f++) {
+      if (noteAt(anchor.open, f) === rootPc) anchors.push(f);
+    }
+    anchors.sort((a, b) => a - b); // lowest (open-position) anchor first
+    let built = null;
+    for (const a of anchors) {
       const notes = [];
-      let str = anchorIdx;
-      let prevFret = startFret;
-      let placedOnString = 1;
-      notes.push({ stringId: strings[str].id, fret: startFret, degree: 0 });
       let ok = true;
-      for (let k = 1; k <= N * 2; k++) {
-        const deg = k % N;
-        const expected = prevFret + (semisOf(k) - semisOf(k - 1));
-        let fret = null;
-        if (placedOnString < 3 && str < strings.length) {
-          fret = pick(occ[str][pcs[deg]], expected);
-        }
-        if (fret === null && str < strings.length - 1) {
-          str++;
-          placedOnString = 0;
-          fret = pick(occ[str][pcs[deg]], expected - tuningOffsets[str - 1]);
-        }
-        if (fret === null) {
+      for (const [sid, degs] of Object.entries(form.layout)) {
+        const s = guitarStrings.find((gs) => gs.id === sid);
+        if (!s) {
           ok = false;
           break;
         }
-        notes.push({ stringId: strings[str].id, fret, degree: deg });
-        prevFret = fret;
-        placedOnString++;
+        for (const deg of degs) {
+          let best = null;
+          for (let f = Math.max(0, a - 6); f <= Math.min(maxFret, a + 6); f++) {
+            if (noteAt(s.open, f) !== pcs[deg]) continue;
+            const d = Math.abs(f - a);
+            if (best == null || d < best.d) best = { f, d };
+          }
+          if (!best) {
+            ok = false;
+            break;
+          }
+          notes.push({ stringId: sid, fret: best.f, degree: deg });
+        }
+        if (!ok) break;
       }
-      if (!ok || notes.length !== N * 2 + 1) continue;
+      if (!ok) continue;
+      // reject anchors that force an unplayable reach (e.g. a root landing on an open
+      // string with its leading tone an octave below): no string may span 7+ frets and
+      // no three consecutive notes on one string may span 5+ frets
+      const perString = {};
+      for (const n of notes) (perString[n.stringId] = perString[n.stringId] || []).push(n.fret);
+      let reachable = true;
+      for (const frets of Object.values(perString)) {
+        frets.sort((x, y) => x - y);
+        if (frets[frets.length - 1] - frets[0] >= 7) {
+          reachable = false;
+          break;
+        }
+        for (let i = 0; i + 2 < frets.length; i++) {
+          if (frets[i + 2] - frets[i] >= 5) {
+            reachable = false;
+            break;
+          }
+        }
+        if (!reachable) break;
+      }
+      if (!reachable) continue;
       const frets = notes.map((n) => n.fret);
-      positions.push({
-        id: `two-oct-${anchorIdx}-${startFret}`,
-        label: `2-oct · ${strings[anchorIdx].label}`,
+      built = {
+        id: form.id,
+        label: form.label,
         notes,
         start: Math.min(...frets),
         end: Math.max(...frets),
-        labelNote: pcs[0],
-      });
+        labelNote: CHROMATIC[rootIdx],
+      };
+      break;
     }
+    if (built) positions.push(built);
   }
   return positions;
 }
 
-// method-book finger numbers: within a 4-fret box each fret cell maps to one finger
-// (1 = index … 4 = pinky); wider 3NPS/two-octave shapes use the per-string convention
-// (fingers relative to the first note on that string, capped at 4).
+// the classic CAGED layouts assume standard tuning; fall back to the generic box builder
+// for non-standard tunings so nothing renders off the neck
+const isStandardTuning = (guitarStrings) =>
+  guitarStrings &&
+  ["e2", "A", "D", "G", "B", "e1"].every((id) => {
+    const s = guitarStrings.find((gs) => gs.id === id);
+    return s && s.open === (id === "e2" || id === "e1" ? "E" : id);
+  });
+
+export function buildTextbookPositions(rootIdx, scale, maxFret, guitarStrings) {
+  const N = scale.intervals.length;
+  if (["majorPent", "minorPent"].includes(scale.id)) return buildScalePositions(rootIdx, scale, maxFret, guitarStrings);
+  if (["blues", "majorBlues"].includes(scale.id)) return buildBluesBoxes(rootIdx, scale, maxFret, guitarStrings);
+  if (N <= 4) return buildArpeggioPositions(rootIdx, scale, maxFret, guitarStrings);
+  if (scale.id === "harmonicMinor" && isStandardTuning(guitarStrings)) return buildHarmonicMinorPositions(rootIdx, scale, maxFret, guitarStrings);
+  const offset = MODE_TO_MAJOR_OFFSET[scale.id];
+  const positionRootIdx = offset == null ? rootIdx : ((rootIdx - offset) % 12 + 12) % 12;
+  return buildCagedPositions(rootIdx, scale, maxFret, guitarStrings, positionRootIdx);
+}
+
+// Standard finger numbers:
+//  - open-position shapes: open strings are 0, fretted notes follow the open layout
+//  - a 4-fret box (or tighter): one finger per fret, index on the lowest fret
+//  - wider 3NPS-style shapes: each string starts on finger 1 and fingers follow the
+//    fret gaps (skip a finger for a 2-semitone gap), capped at the pinky at 4
 export function addFingers(position) {
   const notes = position ? position.notes : [];
   if (!notes.length) return notes;
   const frets = notes.map((n) => n.fret);
-  const span = Math.max(...frets) - Math.min(...frets);
+  const startFret = Math.min(...frets);
+  const span = Math.max(...frets) - startFret;
+
+  if (startFret === 0) {
+    return notes.map((n) => ({ ...n, finger: n.fret === 0 ? 0 : Math.min(4, n.fret) }));
+  }
+
   if (span <= 3) {
-    const startFret = Math.min(...frets);
     return notes.map((n) => ({ ...n, finger: n.fret - startFret + 1 }));
   }
+
   const byString = {};
   for (const n of notes) (byString[n.stringId] = byString[n.stringId] || []).push(n);
   const fingered = [];
   for (const sid of Object.keys(byString)) {
     const ns = byString[sid].slice().sort((a, b) => a.fret - b.fret);
-    const firstFret = ns[0].fret;
-    for (const n of ns) fingered.push({ ...n, finger: Math.max(1, Math.min(4, n.fret - firstFret + 1)) });
+    let prevFinger = 0;
+    let prevFret = null;
+    for (const n of ns) {
+      const gap = prevFret === null ? 0 : n.fret - prevFret;
+      prevFinger = Math.min(4, prevFinger + (gap === 0 ? 1 : gap));
+      prevFret = n.fret;
+      fingered.push({ ...n, finger: prevFinger });
+    }
   }
   return fingered;
 }

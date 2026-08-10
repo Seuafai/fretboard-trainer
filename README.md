@@ -1,8 +1,8 @@
 # Fretboard Trainer
 
-A guitar fretboard note-learning app: a visual tuner, a click-based
-note-ID quiz, and a microphone-based "Find It" mode that listens as
-you play a target note in every position on the neck.
+A guitar fretboard note-learning app: a visual tuner, and a "Find It"
+drill with two inputs — play a note on each string by ear through the
+mic, or click where it lives on the highlighted string.
 
 ## Run it locally
 

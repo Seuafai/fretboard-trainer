@@ -1,7 +1,7 @@
 import { fretFraction, STRINGS } from "../theory.js";
 
 // a full-neck SVG fretboard with wood grain, pearl inlays and fret markers.
-export default function FretboardSVG({ maxFret, activeStrings, markers, pulse, guitarStrings = STRINGS }) {
+export default function FretboardSVG({ maxFret, activeStrings, markers, pulse, guitarStrings = STRINGS, highlightString, highlightColor = "#e0a95f", highlightKey, onCellClick, clickableAll }) {
   const boardLeft = 46;
   const totalWidth = 54 * maxFret;
   const boardWidth = boardLeft + totalWidth + 26;
@@ -16,6 +16,10 @@ export default function FretboardSVG({ maxFret, activeStrings, markers, pulse, g
 
   return (
     <div style={{ overflowX: "auto", background: "#100e0b", border: "1px solid #5c4530", borderRadius: 10, padding: "12px 6px", boxShadow: "0 6px 18px #00000055 inset" }}>
+      <style>{`
+        @keyframes ftStringPulse { 0%,100% { opacity: 0.45; } 50% { opacity: 1; } }
+        .ft-string-hl { animation: ftStringPulse 1.15s ease-in-out infinite; }
+      `}</style>
       <svg width={boardWidth} height={boardHeight + boardTop + 6} viewBox={`0 0 ${boardWidth} ${boardHeight + boardTop + 6}`}>
         <defs>
           <linearGradient id="woodgrain2" x1="0" y1="0" x2="0" y2="1">
@@ -60,7 +64,7 @@ export default function FretboardSVG({ maxFret, activeStrings, markers, pulse, g
           .map((f) => {
             const cx = cellMidX(f);
             const cy = boardTop + boardHeight / 2;
-            const dots = f === 12 || f === 24 ? [cy - 22, cy + 22] : [cy];
+            const dots = f === 12 || f === 24 ? [cy - 28, cy + 28] : [cy];
             return (
               <g key={f}>
                 {dots.map((dy, i) => (
@@ -109,6 +113,35 @@ export default function FretboardSVG({ maxFret, activeStrings, markers, pulse, g
           );
         })}
 
+        {highlightString &&
+          guitarStrings.map((s, idx) => {
+            if (s.id !== highlightString) return null;
+            const y = boardTop + 14 + idx * rowHeight;
+            return (
+              <g key={highlightKey || s.id} className="ft-string-hl">
+                <rect x={boardLeft - 8} y={y - rowHeight / 2 + 5} width={fretX(maxFret) - boardLeft + 8} height={rowHeight - 10} rx={5} fill={highlightColor} opacity={0.22} />
+                <line x1={boardLeft - 8} x2={fretX(maxFret)} y1={y} y2={y} stroke={highlightColor} strokeWidth={Math.max(2, s.thickness + 1)} strokeLinecap="round" opacity={0.9} />
+              </g>
+            );
+          })}
+
+        {onCellClick &&
+          (highlightString || clickableAll) &&
+          guitarStrings.map((s) => {
+            if (highlightString && s.id !== highlightString) return null;
+            const idx = guitarStrings.indexOf(s);
+            const y = boardTop + 14 + idx * rowHeight;
+            const cells = [];
+            for (let f = 0; f <= maxFret; f++) {
+              const x0 = f === 0 ? boardLeft - 34 : fretX(f - 1);
+              const x1 = f === 0 ? boardLeft : fretX(f);
+              cells.push(
+                <rect key={f} x={x0} y={y - rowHeight / 2} width={x1 - x0} height={rowHeight} fill="transparent" style={{ cursor: "pointer" }} onClick={() => onCellClick(s.id, f)} />
+              );
+            }
+            return <g key={s.id}>{cells}</g>;
+          })}
+
         {markers.map((m, i) => {
           const idx = guitarStrings.findIndex((s) => s.id === m.stringId);
           const y = boardTop + 14 + idx * rowHeight;
@@ -117,10 +150,10 @@ export default function FretboardSVG({ maxFret, activeStrings, markers, pulse, g
           return (
             <g key={i} onClick={m.onClick} style={{ cursor: m.onClick ? "pointer" : "default" }}>
               {isPulse && <circle cx={x} cy={y} r={18} fill="url(#markerglow2)" opacity={0.7} />}
-              <circle cx={x} cy={y} r={m.big ? 12 : m.filled ? 10 : 9} fill={m.filled ? m.color : "transparent"} stroke={m.color} strokeWidth={m.filled ? 1.5 : 2} />
-              {m.finger != null && (
-                <text x={x} y={y + 3.5} fontSize={m.big ? 9 : 8} fontWeight={700} textAnchor="middle" className="ft-mono" fill={m.filled ? "#14171c" : "#e0a95f"}>
-                  {m.finger}
+              <circle cx={x} cy={y} r={m.r ?? (m.big ? 12 : m.filled ? 10 : 9)} fill={m.filled ? m.color : "transparent"} stroke={m.color} strokeWidth={m.filled ? 1.5 : 2} />
+              {(m.finger != null || m.label != null) && (
+                <text x={x} y={y + 3.5} fontSize={m.fs ?? (m.big ? 9 : 8)} fontWeight={700} textAnchor="middle" className="ft-mono" fill={m.filled ? "#14171c" : "#e0a95f"}>
+                  {m.finger != null ? m.finger : m.label}
                 </text>
               )}
             </g>

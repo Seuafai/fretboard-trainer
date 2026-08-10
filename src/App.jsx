@@ -4,12 +4,11 @@ import { storage, TUNING_KEY } from "./storage.js";
 import { CHROMATIC, STRINGS, TUNING_PRESETS, tunedStrings } from "./theory.js";
 import { Chip, TuneBanner } from "./components/shared.jsx";
 import TunerPage from "./components/TunerPage.jsx";
-import IdentifyMode from "./components/IdentifyMode.jsx";
 import FindMode from "./components/FindMode.jsx";
 import ScalesMode from "./components/ScalesMode.jsx";
 import CalibrationTest from "./components/CalibrationTest.jsx";
 
-const MAX_FRET = 24; // a standard 24-fret neck — lets every CAGED form (incl. the G form at the 15th) fit in every key
+const MAX_FRET = 23; // a standard 23-fret neck — lets every CAGED form (incl. the G form at the 15th) fit in every key
 
 export default function FretboardTrainer() {
   const [page, setPage] = useState("tuner");
@@ -37,9 +36,10 @@ export default function FretboardTrainer() {
   }, []);
 
   useEffect(() => {
-    if (page === "identify" && mic.status === "active") mic.stop();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page]);
+    const goFind = () => setPage("find");
+    window.addEventListener("ft-go-find", goFind);
+    return () => window.removeEventListener("ft-go-find", goFind);
+  }, []);
 
   const prevTuningPresetRef = useRef(tuningPresetId);
   useEffect(() => {
@@ -116,18 +116,14 @@ export default function FretboardTrainer() {
         </div>
         <p style={{ margin: "0 0 18px", color: "#9aa2ac", fontSize: 14, lineHeight: 1.5 }}>
           {page === "tuner" && "Get in tune — it quietly teaches the app your guitar's voice (pitch and timbre) at the same time."}
-          {page === "identify" && "A brass marker lights up a fret. Name the note before it fades."}
-          {page === "find" && "Play back the note the app calls out — everywhere it lives on the neck."}
-          {page === "scales" && "Pick a scale, choose a position, and play its notes — recognized fretboard patterns."}
+          {page === "find" && "Find a note on each string by ear, or name a lit fret with a click — your choice."}
+          {page === "scales" && "Pick a scale and key, see every note lit across the neck, then tap to shape your own pattern — save it for later."}
           {page === "calibrate" && "Record your guitar's timbre at every shared-note spot so Find It knows which string you actually played."}
         </p>
 
         <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
           <Chip active={page === "tuner"} onClick={() => setPage("tuner")}>
             Tuner
-          </Chip>
-          <Chip active={page === "identify"} onClick={() => setPage("identify")}>
-            Note ID
           </Chip>
           <Chip active={page === "find"} onClick={() => setPage("find")}>
             Find It
@@ -147,9 +143,8 @@ export default function FretboardTrainer() {
         ) : (
           <div className="ft-fade" key={page}>
             {page === "tuner" && <TunerPage mic={mic} tuning={tuning} onUpdateTuning={updateTuning} guitarStrings={guitarStrings} />}
-            {page === "identify" && <IdentifyMode maxFret={MAX_FRET} activeStrings={activeStrings} guitarStrings={guitarStrings} />}
             {page === "find" && <FindMode mic={mic} maxFret={MAX_FRET} activeStrings={activeStrings} tuning={tuning} onGoTune={() => setPage("tuner")} guitarStrings={guitarStrings} />}
-            {page === "scales" && <ScalesMode mic={mic} maxFret={MAX_FRET} activeStrings={activeStrings} guitarStrings={guitarStrings} tuning={tuning} onGoTune={() => setPage("tuner")} />}
+            {page === "scales" && <ScalesMode maxFret={MAX_FRET} activeStrings={activeStrings} guitarStrings={guitarStrings} tuning={tuning} />}
             {page === "calibrate" && <CalibrationTest mic={mic} tuning={tuning} onUpdateSpot={updateSpot} maxFret={MAX_FRET} guitarStrings={guitarStrings} />}
           </div>
         )}
