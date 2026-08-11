@@ -163,3 +163,110 @@ export function useMic() {
   useEffect(() => () => stop(), [stop]);
   return { status, error, start, stop, sample };
 }
+
+// ---------- guitar synthesis & scale playback ----------
+
+// Plucks a guitar-like note with additive synthesis: a stack of sine partials at
+// 1, 2, 3 … times the fundamental, each quieter than the last (1/√n) and decaying
+// faster the higher it is — the same harmonic rolloff a plucked string has — plus a
+// short filtered noise burst for the pick's attack. Purely in-tune (no feedback-loop
+// phase drift) and no samples required.
+
+let synthCtx = null;
+let playback = null; // { master, endAt } of the currently scheduled run
+
+export function midiToFreq(midi) {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+function getSynthCtx() {
+  if (!synthCtx) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    synthCtx = new Ctx();
+  }
+  if (synthCtx.state === "suspended") synthCtx.resume().catch(() => {});
+  return synthCtx;
+}
+
+function pluck(ctx, freq, when, duration, out) {
+  if (!Number.isFinite(freq) || !Number.isFinite(when)) return; // never schedule a bad note
+  const bus = ctx.createGain();
+  bus.gain.value = 0.5;
+  bus.connect(out);
+
+  // the string's harmonic body
+  const partials = Math.min(10, Math.floor(3200 / freq));
+  for (let k = 1; k <= partials; k++) {
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.value = freq * k;
+    const g = ctx.createGain();
+    const amp = 1 / Math.sqrt(k); // louder fundamental, quieter partials
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(amp, when + 0.004); // pluck attack
+    const decay = duration / (1 + 0.5 * (k - 1)); // higher partials fade out sooner
+    g.gain.exponentialRampToValueAtTime(0.0001, when + decay);
+    osc.connect(g);
+    g.connect(bus);
+    osc.start(when);
+    osc.stop(when + duration + 0.05);
+  }
+
+  // the pick's attack: a burst of noise, band-limited near the note so it just
+  // colours the first few milliseconds rather than clicking
+  const burstLen = Math.max(16, Math.round(ctx.sampleRate * 0.02));
+  const burst = ctx.createBuffer(1, burstLen, ctx.sampleRate);
+  const data = burst.getChannelData(0);
+  for (let i = 0; i < burstLen; i++) data[i] = Math.random() * 2 - 1;
+  const noise = ctx.createBufferSource();
+  noise.buffer = burst;
+  const band = ctx.createBiquadFilter();
+  band.type = "bandpass";
+  band.frequency.value = Math.min(8000, freq * 12);
+  band.Q.value = 1.2;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.0001, when);
+  ng.gain.exponentialRampToValueAtTime(0.12, when + 0.001);
+  ng.gain.exponentialRampToValueAtTime(0.0001, when + 0.045);
+  noise.connect(band);
+  band.connect(ng);
+  ng.connect(bus);
+  noise.start(when);
+  noise.stop(when + 0.06);
+}
+
+// schedules a whole run of notes on the audio clock. `notes` are in play order
+// and carry a midi number; each one starts `secondsPerNote` after the last.
+export function playScaleRun(notes, secondsPerNote) {
+  stopPlayback();
+  const ctx = getSynthCtx();
+  const master = ctx.createGain();
+  master.gain.value = 0;
+  master.connect(ctx.destination);
+  master.gain.linearRampToValueAtTime(0.28, ctx.currentTime + 0.02);
+  const step = secondsPerNote;
+  const dur = step * 1.6;
+  notes.forEach((n, i) => {
+    pluck(ctx, midiToFreq(n.midi), ctx.currentTime + i * step, dur, master);
+  });
+  playback = { master, endAt: ctx.currentTime + notes.length * step + dur };
+}
+
+export function stopPlayback() {
+  if (!playback) return;
+  const { master } = playback;
+  playback = null;
+  const ctx = synthCtx;
+  if (ctx && master) {
+    try {
+      master.gain.cancelScheduledValues(ctx.currentTime);
+      master.gain.setValueAtTime(master.gain.value, ctx.currentTime);
+      master.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.15);
+    } catch {}
+    setTimeout(() => {
+      try {
+        master.disconnect();
+      } catch {}
+    }, 250);
+  }
+}

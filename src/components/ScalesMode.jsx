@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Chip, StatCard } from "./shared.jsx";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Chip, Segmented, StatCard } from "./shared.jsx";
 import FretboardSVG from "./FretboardSVG.jsx";
 import NotationStaff from "./NotationStaff.jsx";
+import { playScaleRun, stopPlayback } from "../audio.js";
 import {
   CHROMATIC,
   SCALE_PATTERNS,
@@ -10,6 +11,8 @@ import {
   freqToNote,
   noteAt,
   addFingers,
+  keySignatureOfScale,
+  matchReading,
   spelledScaleSequence,
 } from "../theory.js";
 
@@ -83,30 +86,48 @@ function MenuSelect({ label, value, onChange, options }) {
   );
 }
 
-export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuning }) {
+export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuning, mic }) {
   const prefs = useRef(savedPrefs());
   const [rootIdx, setRootIdx] = useState(() => prefs.current.key ?? 0); // index into CHROMATIC
   const [scaleId, setScaleId] = useState(() => prefs.current.scale ?? "major");
-  const [viewMode, setViewMode] = useState("map"); // "map" | "notation" | "patterns"
-  const [labelMode, setLabelMode] = useState("name"); // "none" | "name" | "degree" (map + patterns view)
-  const [highlightMode, setHighlightMode] = useState("none"); // "none" | "root" | "triad" (map view only)
-  const [patternLabelMode, setPatternLabelMode] = useState("finger"); // "finger" | "name" | "degree" (patterns view only)
-  const [patternShow, setPatternShow] = useState("fretboard"); // "fretboard" | "notation" (patterns view: how a shape is displayed)
+  const [startMidi, setStartMidi] = useState(() => prefs.current.startMidi ?? null); // exact on-screen note the run starts on (null = the lowest root)
+  const [direction, setDirection] = useState(() => prefs.current.direction ?? "updown"); // "up" | "down" | "updown"
+  const [displayMode, setDisplayMode] = useState("fretboard"); // "fretboard" | "notation"
+  const [mapMode, setMapMode] = useState("neck"); // "neck" | "shape"
+  const [labelMode, setLabelMode] = useState("name"); // "none" | "name" | "degree" (full-neck view)
+  const [highlightMode, setHighlightMode] = useState("none"); // "none" | "root" | "triad" (both views)
+  const [patternLabelMode, setPatternLabelMode] = useState("finger"); // "finger" | "name" | "degree" (shape view)
   const [patternIndex, setPatternIndex] = useState(0);
+  const [playing, setPlaying] = useState(false); // scale playback running
+  const [activePlayMidi, setActivePlayMidi] = useState(null); // midi of the exact note currently sounding, so only that one spot flashes
+  const [activeRunIndex, setActiveRunIndex] = useState(null); // position in the run currently sounding (notation highlight)
+  const [bpm, setBpm] = useState(() => prefs.current.bpm ?? 80); // playback tempo in BPM
+  const [autoscroll, setAutoscroll] = useState(() => prefs.current.autoscroll ?? true); // follow the played/heard note along the neck
+  const runTimersRef = useRef([]);
+  const [heard, setHeard] = useState(null); // { midi, stringId, fret, timbre } — note the mic is hearing (timbre = string confirmed by calibration)
+  const heardTimerRef = useRef(null);
   const [selected, setSelected] = useState([]); // [{ stringId, fret }] — the pattern (defaults to the whole scale on the neck)
   const [patternName, setPatternName] = useState("");
   const [savedPatterns, setSavedPatterns] = useState(loadSavedPatterns);
 
   const scale = SCALE_PATTERNS.find((s) => s.id === scaleId) || SCALE_PATTERNS[0];
 
+  // key signature for the staff: derived from the scale's parent major key so blues /
+  // chromatic spellings still get a clean, correct signature
+  const keySignature = useMemo(() => keySignatureOfScale(rootIdx, scale.intervals), [rootIdx, scale]);
+
   // key-correct spelling of the scale (ending back on the root) for notation
   const spelled = spelledScaleSequence(rootIdx, [...scale.intervals, 12]);
   const sequencePcs = spelled.map((n) => CHROMATIC[n.pc]); // sharp-name pitch classes, for matching
   const uniqueScaleNotes = [...new Set(sequencePcs)];
+  // key-correct display name per pitch class (Eb blues spells its ♭3 as Gb, not F#)
+  const scaleNameByPc = new Map();
+  for (const n of spelled) if (!scaleNameByPc.has(n.pc)) scaleNameByPc.set(n.pc, n.name.replace(/\d+$/, ""));
 
   // notation that reflects the actual guitar fretboard: every distinct scale pitch on the
-  // neck, ascending, with its real octave (instead of a single abstracted octave). Spelling
-  // still comes from `spelled` so the key-correct letter names are kept.
+  // neck, ascending. Written pitch — guitar notation sits an octave above the sounding
+  // pitch, so the low-E fret-8 C reads as middle C, not C3. Spelling still comes from
+  // `spelled` so the key-correct letter names are kept.
   const notationSequence = useMemo(() => {
     if (!guitarStrings) return spelled;
     const spellByPc = new Map(spelled.map((n) => [n.pc, n]));
@@ -126,8 +147,8 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
     }
     found.sort((a, b) => a.midi - b.midi);
     return found.map(({ midi, sp }) => {
-      const octave = Math.floor(midi / 12) - 1;
-      return { ...sp, octave, name: `${sp.name.replace(/\d+$/, "")}${octave}` };
+      const octave = Math.floor(midi / 12); // written pitch: sounding + 1 octave
+      return { ...sp, midi, octave, name: `${sp.name.replace(/\d+$/, "")}${octave}` };
     });
   }, [guitarStrings, maxFret, uniqueScaleNotes, spelled]);
 
@@ -172,7 +193,8 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
   );
   const activePatternPosition = patternPositions[Math.min(patternIndex, patternPositions.length - 1)];
 
-  // the active shape's notes as musical notation: real fretboard octaves, ascending, deduped
+  // the active shape's notes as musical notation: written guitar pitch (an octave above
+  // sounding), ascending, deduped
   const patternNotationSequence = useMemo(() => {
     if (!activePatternPosition || !guitarStrings) return [];
     const spellByPc = new Map(spelled.map((n) => [n.pc, n]));
@@ -191,10 +213,85 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
     }
     found.sort((a, b) => a.midi - b.midi);
     return found.map(({ midi, sp }) => {
-      const octave = Math.floor(midi / 12) - 1;
-      return { ...sp, octave, name: `${sp.name.replace(/\d+$/, "")}${octave}` };
+      const octave = Math.floor(midi / 12); // written pitch: sounding + 1 octave
+      return { ...sp, midi, octave, name: `${sp.name.replace(/\d+$/, "")}${octave}` };
     });
   }, [activePatternPosition, guitarStrings, spelled]);
+
+  // the run played out loud (and written on the staff): starts on whichever exact
+  // note you picked on screen — shapes hold the root at several octaves, so the choice
+  // is a specific note, not just a degree — then ascends / descends / sweeps up-and-down
+  // through the notes on screen. Every move is to an adjacent scale degree, and in the
+  // up-and-down mode the phrase returns to the note it started on.
+  const startOptions = useMemo(() => {
+    const seq = mapMode === "shape" ? patternNotationSequence : notationSequence;
+    return seq.map((n) => ({
+      value: n.midi,
+      label: `${degreeOf[CHROMATIC[n.pc]] || "–"} · ${n.name.replace(/\d+$/, "")}${Math.floor(n.midi / 12) - 1}`,
+    }));
+  }, [mapMode, patternNotationSequence, notationSequence, degreeOf]);
+
+  const effectiveStartMidi = useMemo(() => {
+    const seq = mapMode === "shape" ? patternNotationSequence : notationSequence;
+    if (startMidi != null && seq.some((n) => n.midi === startMidi)) return startMidi;
+    const rootPc = CHROMATIC[rootIdx];
+    const firstRoot = seq.find((n) => CHROMATIC[n.pc] === rootPc);
+    return firstRoot ? firstRoot.midi : seq.length ? seq[0].midi : null;
+  }, [mapMode, patternNotationSequence, notationSequence, startMidi, rootIdx]);
+
+  const runSequence = useMemo(() => {
+    const seq = mapMode === "shape" ? patternNotationSequence : notationSequence;
+    if (!seq.length) return [];
+    const up = seq.map((n) => ({ ...n, pcName: CHROMATIC[n.pc] }));
+    let s = up.findIndex((n) => n.midi === effectiveStartMidi);
+    if (s === -1) s = 0;
+    const fromStart = up.slice(s);
+    const below = up.slice(0, s);
+    const above = fromStart.slice(1);
+
+    if (direction === "up") {
+      // mirror of "down": climb to the top of the shape, sweep all the way back down to
+      // the bottom, then climb home to the start note
+      if (mapMode === "shape") {
+        const backDown = [...above.slice(0, -1).reverse(), fromStart[0]];
+        if (!above.length) return [fromStart[0], ...below.slice().reverse(), ...below.slice(1), fromStart[0]];
+        if (!below.length) return [fromStart[0], ...above, ...backDown];
+        return [fromStart[0], ...above, ...backDown, ...below.slice().reverse(), ...below.slice(1), fromStart[0]];
+      }
+      // the full neck is too long to double every note; climb to the top and come
+      // straight back down to the start note
+      return fromStart.length > 1 ? [...fromStart, ...fromStart.slice(1, -1).reverse(), fromStart[0]] : fromStart;
+    }
+
+    if (direction === "down") {
+      // descend to the bottom of the shape, sweep all the way back up to the top, then
+      // descend home to the start note
+      if (mapMode === "shape") {
+        const backDown = [...above.slice(0, -1).reverse(), fromStart[0]];
+        if (!below.length) return [fromStart[0], ...above, ...backDown];
+        if (!above.length) return [fromStart[0], ...below.slice().reverse(), ...below.slice(1), fromStart[0]];
+        return [fromStart[0], ...below.slice().reverse(), ...below.slice(1), fromStart[0], ...above, ...backDown];
+      }
+      // the full neck is too long to sweep the whole way back; descend to the bottom
+      // and climb straight home to the start note
+      if (!below.length) return fromStart;
+      return fromStart.length > 1 ? [fromStart[0], ...below.slice().reverse(), ...below.slice(1), fromStart[0]] : fromStart;
+    }
+
+    // up & down
+    if (mapMode === "shape") {
+      // a shape is a small handful of notes — play every one of them, starting on the
+      // chosen degree, sweeping up to the top, back through the start, down to the low
+      // notes and home to the start
+      const downToStart = [...above.slice(0, -1).reverse(), fromStart[0]];
+      if (!below.length) return [fromStart[0], ...above, ...downToStart];
+      if (!above.length) return [fromStart[0], ...below.slice().reverse(), ...below.slice(1), fromStart[0]];
+      return [fromStart[0], ...above, ...downToStart, ...below.slice().reverse(), ...below.slice(1), fromStart[0]];
+    }
+    // the full neck is too long to double every note; climb from the start to the top
+    // and come straight back down to it
+    return fromStart.length > 1 ? [...fromStart, ...fromStart.slice(1, -1).reverse(), fromStart[0]] : fromStart;
+  }, [mapMode, patternNotationSequence, notationSequence, effectiveStartMidi, direction]);
 
   // highlighted scale degrees: "root" = the tonic (degree 0); "triad" = the 1-3-5 chord
   // tones of the scale. For 7-note scales these are simply degrees 0/2/4, but pentatonic,
@@ -233,7 +330,7 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
   // map view: scale notes only; grey by default, accented where the highlight option says.
   // Tap to toggle any scale note in/out of the pattern.
   const mapMarkers = useMemo(() => {
-    if (viewMode !== "map") return [];
+    if (mapMode !== "neck") return [];
     const markers = [];
     for (const s of guitarStrings) {
       for (let f = 0; f <= maxFret; f++) {
@@ -241,6 +338,7 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
         if (!uniqueScaleNotes.includes(n)) continue; // only scale notes on the map
         const inPattern = selectedKeys.has(spotKey(s.id, f));
         const highlighted = highlightPcs.has(n);
+        const playing = activePlayMidi != null && freqToNote(s.openFreq).midi + f === activePlayMidi;
         markers.push({
           stringId: s.id,
           fret: f,
@@ -248,16 +346,18 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
           color: highlighted ? highlightPcs.get(n) : inPattern ? "#8b8f96" : "#4a4f58",
           r: highlighted ? 13.5 : 12,
           fs: 12,
-          label: labelMode === "name" ? displayName(n) : labelMode === "degree" ? degreeOf[n] : null,
+          playing,
+          heard: heard != null && (heard.timbre ? s.id === heard.stringId && f === heard.fret : freqToNote(s.openFreq).midi + f === heard.midi),
+          label: labelMode === "name" ? scaleNameByPc.get(CHROMATIC.indexOf(n)) || displayName(n) : labelMode === "degree" ? degreeOf[n] : null,
         });
       }
     }
     return markers;
-  }, [viewMode, guitarStrings, maxFret, selectedKeys, rootIdx, labelMode, degreeOf, uniqueScaleNotes, highlightPcs]);
+  }, [mapMode, guitarStrings, maxFret, selectedKeys, rootIdx, labelMode, degreeOf, uniqueScaleNotes, highlightPcs, activePlayMidi, heard]);
 
   useEffect(() => {
-    localStorage.setItem(SCALES_PREFS_KEY, JSON.stringify({ key: rootIdx, scale: scaleId }));
-  }, [rootIdx, scaleId]);
+    localStorage.setItem(SCALES_PREFS_KEY, JSON.stringify({ key: rootIdx, scale: scaleId, startMidi, direction, bpm, autoscroll }));
+  }, [rootIdx, scaleId, startMidi, direction, bpm, autoscroll]);
 
   useEffect(() => {
     setPatternIndex(0);
@@ -268,23 +368,41 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
   // on top — either with finger numbers (to learn the fingering), or labelled with note
   // names / scale degrees so you can see what each note in the shape actually is.
   const patternMarkers = useMemo(() => {
-    if (viewMode !== "patterns" || !activePatternPosition) return [];
+    if (mapMode !== "shape" || !activePatternPosition) return [];
+    // the shape's own notes. When the mic hears a pitch that lives in the shape, we assume
+    // the player is playing the shape's position, so the dim full-neck duplicate stays dark.
+    const shapeNotes = addFingers(activePatternPosition).filter((n) => activeStrings.includes(n.stringId));
+    const shapeMidis = new Set();
+    for (const n of shapeNotes) {
+      const s = guitarStrings.find((gs) => gs.id === n.stringId);
+      if (s) shapeMidis.add(freqToNote(s.openFreq).midi + n.fret);
+    }
     const dim = [];
     for (const s of guitarStrings) {
       for (let f = 0; f <= maxFret; f++) {
         const n = noteAt(s.open, f);
-        if (uniqueScaleNotes.includes(n)) dim.push({ stringId: s.id, fret: f, color: "#4a4f58", r: 6 });
+        if (uniqueScaleNotes.includes(n)) {
+          const midi = freqToNote(s.openFreq).midi + f;
+          dim.push({
+            stringId: s.id,
+            fret: f,
+            color: "#4a4f58",
+            r: 6,
+            heard: heard != null && midi === heard.midi && !shapeMidis.has(midi),
+          });
+        }
       }
     }
-    const shape = addFingers(activePatternPosition).flatMap((n) => {
-      if (!activeStrings.includes(n.stringId)) return [];
+    const shape = shapeNotes.map((n) => {
       const highlighted = highlightPosColor.has(n.degree);
-      const marker = { stringId: n.stringId, fret: n.fret, filled: true, big: highlighted, color: highlighted ? highlightPosColor.get(n.degree) : "#8b8f96", r: highlighted ? 12 : 10.5, fs: 9 };
+      const s = guitarStrings.find((gs) => gs.id === n.stringId);
+      const midi = s != null ? freqToNote(s.openFreq).midi + n.fret : null;
+      const playing = midi != null && activePlayMidi != null && midi === activePlayMidi;
+      const marker = { stringId: n.stringId, fret: n.fret, filled: true, big: highlighted, color: highlighted ? highlightPosColor.get(n.degree) : "#8b8f96", r: highlighted ? 12 : 10.5, fs: 9, playing, heard: heard != null && midi === heard.midi };
       if (patternLabelMode === "name") {
-        const s = guitarStrings.find((gs) => gs.id === n.stringId);
-        marker.label = s ? displayName(noteAt(s.open, n.fret)) : null;
+        const pcName = s ? noteAt(s.open, n.fret) : null;
+        marker.label = pcName ? scaleNameByPc.get(CHROMATIC.indexOf(pcName)) || displayName(pcName) : null;
       } else if (patternLabelMode === "degree") {
-        const s = guitarStrings.find((gs) => gs.id === n.stringId);
         marker.label = s ? degreeOf[noteAt(s.open, n.fret)] : null;
       } else {
         marker.finger = n.finger;
@@ -292,11 +410,15 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
       return marker;
     });
     return [...dim, ...shape];
-  }, [viewMode, activePatternPosition, guitarStrings, maxFret, activeStrings, uniqueScaleNotes, highlightPosColor, patternLabelMode, degreeOf]);
+  }, [mapMode, activePatternPosition, guitarStrings, maxFret, activeStrings, uniqueScaleNotes, highlightPosColor, patternLabelMode, degreeOf, activePlayMidi, heard]);
 
   const tunedCount = guitarStrings.filter((s) => tuning && tuning[s.id]).length;
 
   const scaleName = `${displayName(CHROMATIC[rootIdx])} ${scale.label}`;
+
+  const heardPc = heard != null ? heard.midi % 12 : null;
+  const heardNote = heardPc != null ? scaleNameByPc.get(heardPc) || displayName(CHROMATIC[heardPc]) : null;
+  const heardInScale = heardPc != null && uniqueScaleNotes.includes(CHROMATIC[heardPc]);
 
   const savePattern = () => {
     if (!patternName.trim() || selected.length === 0) return;
@@ -310,7 +432,8 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
   const loadPattern = (p) => {
     setSelected(p.spots);
     setPatternName(p.name);
-    setViewMode("map");
+    setDisplayMode("fretboard");
+    setMapMode("neck");
   };
 
   const deletePattern = (id) => {
@@ -318,6 +441,104 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
     setSavedPatterns(next);
     localStorage.setItem(SAVED_PATTERNS_KEY, JSON.stringify(next));
   };
+
+  // plays what's on screen: the whole scale across the neck, or just the active
+  // shape's notes. The run starts on the chosen degree (the tonic by default), climbs
+  // / descends / sweeps through the notes, and lands back on the start. Each sounding
+  // note is highlighted in sync. When the run finishes the mic comes on so you can
+  // play along and hear yourself.
+  const playRun = useCallback(() => {
+    const run = runSequence;
+    if (!run.length) return;
+    if (mic && mic.status === "active") mic.stop(); // never feed playback back through the mic
+    const secondsPerNote = 60 / bpm;
+    playScaleRun(run, secondsPerNote);
+    setPlaying(true);
+    setActivePlayMidi(null);
+    setActiveRunIndex(null);
+    runTimersRef.current.forEach(clearTimeout);
+    const timers = [];
+    run.forEach((n, i) =>
+      timers.push(
+        setTimeout(() => {
+          setActivePlayMidi(n.midi);
+          setActiveRunIndex(i);
+        }, Math.round(i * secondsPerNote * 1000))
+      )
+    );
+    timers.push(
+      setTimeout(() => {
+        setActivePlayMidi(null);
+        setActiveRunIndex(null);
+        setPlaying(false);
+        if (mic) mic.start(); // turn the mic on for practice once the playthrough is done
+      }, Math.round((run.length * secondsPerNote + 0.25) * 1000))
+    );
+    runTimersRef.current = timers;
+  }, [runSequence, bpm, mic]);
+
+  const stopRun = useCallback(() => {
+    runTimersRef.current.forEach(clearTimeout);
+    runTimersRef.current = [];
+    stopPlayback();
+    setActivePlayMidi(null);
+    setActiveRunIndex(null);
+    setPlaying(false);
+  }, []);
+
+  // stop the run if the view, key, scale, shape or run settings change mid-play
+  useEffect(() => {
+    stopRun();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootIdx, scaleId, mapMode, displayMode, patternIndex, startMidi, direction]);
+
+  useEffect(() => () => stopRun(), [stopRun]);
+
+  // with the mic on (after a playthrough it comes back on for practice), listen for the
+  // guitar and flash the note being played, so you can play the scale along with the run.
+  useEffect(() => {
+    if (!mic || mic.status !== "active" || playing) return;
+    const iv = setInterval(() => {
+      const s = mic.sample();
+      if (!s || !s.confident) return;
+      const pos = matchReading(s, { guitarStrings, activeStrings, maxFret, tuning });
+      if (!pos) return;
+      const sObj = guitarStrings.find((gs) => gs.id === pos.stringId);
+      if (!sObj) return;
+      // when the timbre is calibrated the string is known, so only that spot flashes;
+      // otherwise match by pitch alone and light every occurrence of the note.
+      setHeard({ midi: freqToNote(sObj.openFreq).midi + pos.fret, stringId: pos.stringId, fret: pos.fret, timbre: pos.dist != null });
+      clearTimeout(heardTimerRef.current);
+      heardTimerRef.current = setTimeout(() => setHeard(null), 320); // follow the note's sustain
+    }, 60);
+    return () => {
+      clearInterval(iv);
+      clearTimeout(heardTimerRef.current);
+    };
+  }, [mic.status, playing, guitarStrings, activeStrings, maxFret, tuning]);
+
+  // which fret the view should follow. When a note is playing or heard, scroll to it —
+  // if the pitch lives at several spots (unison strings), stay on the one nearest to
+  // where the view already is so it doesn't jump between strings.
+  const followFretRef = useRef(0);
+  const followFret = useMemo(() => {
+    if (!autoscroll) return null;
+    const cands = (mapMode === "neck" ? mapMarkers : patternMarkers).filter((m) => m.playing || m.heard);
+    if (!cands.length) return null;
+    if (heard && heard.timbre) {
+      const exact = cands.find((m) => m.heard && m.stringId === heard.stringId && m.fret === heard.fret);
+      if (exact) return exact.fret;
+    }
+    let best = cands[0];
+    for (const c of cands) {
+      if (Math.abs(c.fret - followFretRef.current) < Math.abs(best.fret - followFretRef.current)) best = c;
+    }
+    return best.fret;
+  }, [autoscroll, mapMode, mapMarkers, patternMarkers, heard]);
+
+  useEffect(() => {
+    if (followFret != null) followFretRef.current = followFret;
+  }, [followFret]);
 
   return (
     <div>
@@ -341,58 +562,79 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
         />
       </div>
 
-      <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 12 }}>
-        <Chip active={viewMode === "map"} onClick={() => setViewMode("map")}>
-          Map
-        </Chip>
-        <Chip active={viewMode === "notation"} onClick={() => setViewMode("notation")}>
-          Notation
-        </Chip>
-        <Chip active={viewMode === "patterns"} onClick={() => setViewMode("patterns")}>
-          Patterns
-        </Chip>
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
+        <Segmented
+          options={[
+            { value: "fretboard", label: "Fretboard" },
+            { value: "notation", label: "Notation" },
+          ]}
+          value={displayMode}
+          onChange={setDisplayMode}
+        />
       </div>
 
-      {viewMode === "map" && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, color: "#9aa2ac" }}>Labels</span>
-          <Chip active={labelMode === "name"} onClick={() => setLabelMode("name")}>
-            Note name
-          </Chip>
-          <Chip active={labelMode === "degree"} onClick={() => setLabelMode("degree")}>
-            Scale degree
-          </Chip>
-          <Chip active={labelMode === "none"} onClick={() => setLabelMode("none")}>
-            None
-          </Chip>
-        </div>
-      )}
+      <div style={{ display: "flex", justifyContent: "center", gap: 10, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+        <button className="ft-primary-btn" onClick={playing ? stopRun : playRun} style={{ minWidth: 90 }}>
+          {playing ? "Stop" : "Play"}
+        </button>
+        <MenuSelect
+          label="Tempo"
+          value={bpm}
+          onChange={(v) => setBpm(Number(v))}
+          options={[50, 60, 70, 80, 90, 100, 110, 120, 140, 160, 180, 200].map((b) => ({ value: b, label: `${b} BPM` }))}
+        />
+        <Segmented
+          options={[
+            { value: "up", label: "Up" },
+            { value: "down", label: "Down" },
+            { value: "updown", label: "Up & Down" },
+          ]}
+          value={direction}
+          onChange={setDirection}
+        />
+        <MenuSelect
+          label="Start on"
+          value={effectiveStartMidi}
+          onChange={(v) => setStartMidi(Number(v))}
+          options={startOptions}
+        />
+        <button
+          onClick={() => (mic && mic.status === "active" ? mic.stop() : mic && mic.start())}
+          disabled={mic && mic.status === "requesting"}
+          style={{ background: "transparent", border: "1px solid #4a6a4a", color: mic && mic.status === "active" ? "#7cb37a" : "#9aa2ac", borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: "pointer" }}
+        >
+          {mic && mic.status === "active" ? "Mic on" : mic && mic.status === "requesting" ? "Mic…" : "Mic off"}
+        </button>
+        <button
+          onClick={() => setAutoscroll((a) => !a)}
+          style={{ background: "transparent", border: "1px solid #3a4a5a", color: autoscroll ? "#6ba5e8" : "#9aa2ac", borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: "pointer" }}
+        >
+          {autoscroll ? "Auto-scroll on" : "Auto-scroll off"}
+        </button>
+        {playing ? (
+          <span style={{ fontSize: 12, color: "#e0a95f" }}>playing…</span>
+        ) : mic && mic.status === "active" ? (
+          <span style={{ fontSize: 12, color: heardNote ? (heardInScale ? "#7cb37a" : "#e08a71") : "#7cb37a" }}>
+            {heardNote ? `hearing ${heardNote}${heardInScale ? " · in scale" : " · not in scale"}` : "listening…"}
+          </span>
+        ) : mic && mic.status === "error" ? (
+          <span style={{ fontSize: 12, color: "#e08a71" }}>mic error</span>
+        ) : null}
+      </div>
 
-      {(viewMode === "map" || viewMode === "patterns") && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, color: "#9aa2ac" }}>Highlight</span>
-          <Chip active={highlightMode === "none"} onClick={() => setHighlightMode("none")}>
-            None
-          </Chip>
-          <Chip active={highlightMode === "root"} onClick={() => setHighlightMode("root")}>
-            Root
-          </Chip>
-          <Chip active={highlightMode === "triad"} onClick={() => setHighlightMode("triad")}>
-            1-3-5
-          </Chip>
-        </div>
-      )}
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
+        <Segmented
+          options={[
+            { value: "neck", label: "Full neck" },
+            { value: "shape", label: "Scale shape" },
+          ]}
+          value={mapMode}
+          onChange={setMapMode}
+        />
+      </div>
 
-      {viewMode === "map" && (
-        <div style={{ textAlign: "center", padding: "12px 16px", border: "1px dashed #2a2f3a", borderRadius: 10, marginBottom: 14 }}>
-          <p style={{ margin: 0, color: "#9aa2ac", fontSize: 14 }}>
-            <strong style={{ color: "#f3ead9" }}>{scaleName}</strong> is lit across the whole neck. Tap a lit note to drop it, tap a dim scale note to add it — build the exact pattern you want to play.
-          </p>
-        </div>
-      )}
-
-      {viewMode === "patterns" && patternPositions.length > 0 && (
-        <div style={{ marginBottom: 14 }}>
+      {mapMode === "shape" && patternPositions.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Shape</div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {patternPositions.map((p, i) => (
@@ -404,57 +646,83 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
         </div>
       )}
 
-      {viewMode === "patterns" && patternPositions.length > 0 && (
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Shape display</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <Chip active={patternShow === "fretboard"} onClick={() => setPatternShow("fretboard")}>
-              Fretboard
-            </Chip>
-            <Chip active={patternShow === "notation"} onClick={() => setPatternShow("notation")}>
-              Notation
-            </Chip>
-          </div>
+      {displayMode === "fretboard" && mapMode === "neck" && (
+        <div style={{ textAlign: "center", padding: "12px 16px", border: "1px dashed #2a2f3a", borderRadius: 10, marginBottom: 12 }}>
+          <p style={{ margin: 0, color: "#9aa2ac", fontSize: 14 }}>
+            <strong style={{ color: "#f3ead9" }}>{scaleName}</strong> is lit across the whole neck. Tap a lit note to drop it, tap a dim scale note to add it — build the exact pattern you want to play.
+          </p>
         </div>
       )}
 
-      {viewMode === "patterns" && patternPositions.length > 0 && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, color: "#9aa2ac" }}>Shape labels</span>
-          <Chip active={patternLabelMode === "finger"} onClick={() => setPatternLabelMode("finger")}>
-            Fingers
-          </Chip>
-          <Chip active={patternLabelMode === "name"} onClick={() => setPatternLabelMode("name")}>
-            Notes
-          </Chip>
-          <Chip active={patternLabelMode === "degree"} onClick={() => setPatternLabelMode("degree")}>
-            Degrees
-          </Chip>
+      {displayMode === "fretboard" && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap", justifyContent: "center" }}>
+          <span style={{ fontSize: 13, color: "#9aa2ac" }}>Labels</span>
+          {mapMode === "shape" ? (
+            <Segmented
+              options={[
+                { value: "finger", label: "Fingers" },
+                { value: "name", label: "Notes" },
+                { value: "degree", label: "Degrees" },
+              ]}
+              value={patternLabelMode}
+              onChange={setPatternLabelMode}
+            />
+          ) : (
+            <Segmented
+              options={[
+                { value: "none", label: "None" },
+                { value: "name", label: "Notes" },
+                { value: "degree", label: "Degrees" },
+              ]}
+              value={labelMode}
+              onChange={setLabelMode}
+            />
+          )}
         </div>
       )}
 
-      {viewMode === "patterns" && patternPositions.length === 0 && (
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14, flexWrap: "wrap", justifyContent: "center" }}>
+        <span style={{ fontSize: 13, color: "#9aa2ac" }}>Highlight</span>
+        <Segmented
+          options={[
+            { value: "none", label: "None" },
+            { value: "root", label: "Root" },
+            { value: "triad", label: "1-3-5" },
+          ]}
+          value={highlightMode}
+          onChange={setHighlightMode}
+        />
+      </div>
+
+      {mapMode === "shape" && patternPositions.length === 0 ? (
         <div style={{ textAlign: "center", padding: "18px 16px", border: "1px dashed #2a2f3a", borderRadius: 10, marginBottom: 14 }}>
           <p style={{ color: "#9aa2ac", fontSize: 14, margin: 0 }}>No textbook shapes found for this scale.</p>
         </div>
+      ) : (
+        <div style={{ marginBottom: 14 }}>
+          {displayMode === "notation" ? (
+            <NotationStaff
+              sequence={runSequence}
+              keySignature={keySignature}
+              highlightPcs={highlightPcs}
+              activeIndex={activeRunIndex}
+              heardMidi={heard ? heard.midi : null}
+            />
+          ) : (
+            <FretboardSVG
+              maxFret={maxFret}
+              activeStrings={activeStrings}
+              markers={mapMode === "neck" ? mapMarkers : patternMarkers}
+              guitarStrings={guitarStrings}
+              onCellClick={mapMode === "neck" ? toggleSpot : undefined}
+              clickableAll={mapMode === "neck"}
+              followFret={followFret}
+            />
+          )}
+        </div>
       )}
 
-      <div style={{ marginBottom: 14 }}>
-        {viewMode === "notation" || (viewMode === "patterns" && patternShow === "notation") ? (
-          <NotationStaff sequence={viewMode === "notation" ? notationSequence : patternNotationSequence} />
-        ) : (
-          <FretboardSVG
-            maxFret={maxFret}
-            activeStrings={activeStrings}
-            markers={viewMode === "map" ? mapMarkers : patternMarkers}
-            guitarStrings={guitarStrings}
-            onCellClick={viewMode === "map" ? toggleSpot : undefined}
-            clickableAll={viewMode === "map"}
-          />
-        )}
-      </div>
-
-      {viewMode === "map" && (
+      {mapMode === "neck" && (
         <div style={{ marginBottom: 20 }}>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 12 }}>
             <input

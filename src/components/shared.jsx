@@ -9,6 +9,35 @@ export function StatCard({ label, value }) {
   );
 }
 
+export function Segmented({ options, value, onChange }) {
+  return (
+    <div style={{ display: "inline-flex", background: "#161a21", border: "1px solid #2a2f3a", borderRadius: 9, padding: 3, gap: 2 }}>
+      {options.map((o) => {
+        const active = o.value === value;
+        return (
+          <button
+            key={o.value}
+            className="ft-chip"
+            onClick={() => onChange(o.value)}
+            style={{
+              padding: "6px 14px",
+              borderRadius: 7,
+              border: "none",
+              background: active ? "#e0a95f" : "transparent",
+              color: active ? "#14171c" : "#9aa2ac",
+              fontSize: 13,
+              fontWeight: active ? 600 : 500,
+              cursor: "pointer",
+            }}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Chip({ active, onClick, children }) {
   return (
     <button

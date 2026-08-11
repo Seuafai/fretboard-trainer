@@ -140,82 +140,158 @@ export function ledgerYsFor(stepsFromE4, bottomLineY, halfStep) {
   return ys;
 }
 
-// spelling style for a scale root: major keys on F and the flat-preferring roots
-// (C#→Db, D#→Eb, G#→Ab, A#→Bb) use flats; everything else uses sharps.
-export function spellDirection(rootIdx) {
+// spelling style for a scale root: major-family scales on F and the flat-preferring
+// roots (C#→Db, D#→Eb, G#→Ab, A#→Bb) use flats; minor-family scales on those same
+// flat-preferring roots use flats too, so a key picked as "Eb" spells as Eb (the
+// double-flat fallback below catches the few roots where flats force double flats,
+// e.g. Db minor → re-spells as C# minor).
+export function spellDirection(rootIdx, family = "major") {
   const pc = CHROMATIC[rootIdx];
+  if (family === "minor") {
+    // minor-family scales on flat-leaning roots (D, G, F, and the flat-named roots
+    // C#→Db, D#→Eb, G#→Ab, A#→Bb) use flats so "Eb blues" spells as Eb Gb Ab A Bb Db,
+    // not D# F# G# A A# C#; E, B, F# minors stay sharp. Roots where flats would force
+    // double flats (Db minor) fall back to sharps in spelledScaleSequence.
+    if (pc === "D" || pc === "G" || FLAT_PREFERRED[pc]) return "flat";
+    return "sharp";
+  }
   return FLAT_PREFERRED[pc] && (pc === "F" || pc.includes("#")) ? "flat" : "sharp";
 }
 
+// major vs minor family, used to pick the spelling direction. 7-note scales are judged
+// by their 3rd (3 → minor, 4 → major); smaller scales by whether their notes fit the
+// major-scale skeleton. `intervals` may include the trailing octave root.
+export function scaleFamily(intervals) {
+  const all = intervals.slice(0, intervals.length - 1);
+  if (all.length === 7) return all.includes(4) ? "major" : "minor";
+  return all.every((c) => MAJOR_PARENT_INTS.includes(c)) ? "major" : "minor";
+}
+
+const MAJOR_PARENT_INTS = [0, 2, 4, 5, 7, 9, 11];
+const NATURAL_PCS = [0, 2, 4, 5, 7, 9, 11];
+
 const naturalPcOf = (letter) => [0, 2, 4, 5, 7, 9, 11][NATURAL_LETTERS.indexOf(letter)]; // C=0 D=2 E=4 F=5 G=7 A=9 B=11
 
-// spells a scale the way it should be written in the key: each degree gets its own
-// letter (all 7 used once for 7-note scales; letters skipped for pentatonic/blues),
-// with ♯/♭ accidentals chosen to match the key. `intervals` should include the octave
-// root (e.g. [...major.intervals, 12]).
-export function spelledScaleSequence(rootIdx, intervals) {
-  const dir = spellDirection(rootIdx);
-  const names = dir === "flat" ? FLAT_NAMES : CHROMATIC;
-  const rootLetter = names[rootIdx][0];
-  const R = NATURAL_LETTERS.indexOf(rootLetter);
+// the natural-letter index just below/above a pitch class, so its accidental is always a
+// single ♯ or ♭ (a chromatic note like C# is C# in sharps or Db in flats, never Fb or Bbb).
+function letterBelow(pc) {
+  for (let i = NATURAL_PCS.length - 1; i >= 0; i--) if (NATURAL_PCS[i] < pc) return i;
+  return 0;
+}
+function letterAbove(pc) {
+  for (let i = 0; i < NATURAL_PCS.length; i++) if (NATURAL_PCS[i] > pc) return i;
+  return NATURAL_PCS.length - 1;
+}
+
+// spells a scale the way it should be written in the key: 7-note scales use every letter
+// once (so D minor reads D E F G A Bb C, not D E F G A A# C), while smaller scales
+// (pentatonic/blues/arpeggios) give each note the natural letter it sits nearest in the
+// key's direction — chromatic neighbours may share a letter (C blues → C D D# E G A), and
+// a double accidental is never produced. `intervals` should include the octave root.
+// `forceDir` ("sharp" | "flat") overrides the direction, used to spell a scale's parent
+// major key in the same style as the scale itself (Eb blues stays flat-keyed).
+export function spelledScaleSequence(rootIdx, intervals, forceDir) {
+  const family = scaleFamily(intervals);
   const L = intervals.length;
-  const letters = new Array(L);
-  letters[0] = rootLetter;
-  letters[L - 1] = rootLetter;
+  const dir = forceDir || spellDirection(rootIdx, family);
 
-  // pentatonic/blues notes are a subset of a 7-note parent scale; spell them with the
-  // parent's letters (so Db minor pentatonic reads Fb not E). If they fit the major
-  // scale they're major-family, otherwise minor-family (covers majorPent/minorPent/blues).
-  const MAJOR_PARENT = [0, 2, 4, 5, 7, 9, 11];
-  const MINOR_PARENT = [0, 2, 3, 5, 7, 8, 10];
-  const child = intervals.slice(0, L - 1);
+  const spellWith = (dir) => {
+    const names = dir === "flat" ? FLAT_NAMES : CHROMATIC;
+    const rootLetter = names[rootIdx][0];
+    const R = NATURAL_LETTERS.indexOf(rootLetter);
+    const letters = new Array(L);
+    letters[0] = rootLetter;
+    letters[L - 1] = rootLetter;
 
-  if (L === 8) {
-    // 7-note scales use every letter once, ascending from the root (deterministic)
-    for (let i = 1; i <= L - 2; i++) letters[i] = NATURAL_LETTERS[(R + i) % 7];
-  } else {
-    const parent = child.every((c) => MAJOR_PARENT.includes(c)) ? MAJOR_PARENT : MINOR_PARENT;
-    let prevK = 0;
-    for (let i = 1; i <= L - 2; i++) {
-      const c = intervals[i];
-      let k;
-      if (c === 6) {
-        // blues b5: reuse the 5th's letter when it's within a semitone of the b5
-        // pitch (D blues b5→Ab, G blues b5→Db), otherwise use the 4th's letter
-        // (Eb blues b5→A, F blues b5→B). Matches how blues scales are written.
-        const b5Pc = (rootIdx + c) % 12;
-        const fifthPc = naturalPcOf(NATURAL_LETTERS[(R + 4) % 7]);
-        k = Math.abs(fifthPc - b5Pc) <= 1 ? 4 : 3;
-        if (k < prevK) k = prevK;
-      } else {
-        // nearest parent-scale interval, non-decreasing; tie → later letter
-        k = prevK;
-        let bestDist = Infinity;
-        for (let kk = prevK; kk < 7; kk++) {
-          const dist = Math.abs(c - parent[kk]);
-          if (dist < bestDist || (dist === bestDist && kk > k)) {
-            bestDist = dist;
-            k = kk;
+    if (L === 8) {
+      for (let i = 1; i <= L - 2; i++) letters[i] = NATURAL_LETTERS[(R + i) % 7];
+    } else {
+      let prevKRel = 0;
+      for (let i = 1; i <= L - 2; i++) {
+        const pc = (rootIdx + intervals[i]) % 12;
+        let k;
+        if (NATURAL_PCS.includes(pc)) {
+          k = NATURAL_PCS.indexOf(pc);
+        } else {
+          k = dir === "sharp" ? letterBelow(pc) : letterAbove(pc);
+        }
+        let kRel = (k - R + 7) % 7;
+        if (kRel < prevKRel) {
+          // prefer the other neighbour when it keeps the letters in order
+          const alt = dir === "sharp" ? letterAbove(pc) : letterBelow(pc);
+          const altRel = (alt - R + 7) % 7;
+          if (altRel >= prevKRel) {
+            k = alt;
+            kRel = altRel;
+          } else {
+            k = NATURAL_LETTERS[(R + prevKRel) % 7];
+            kRel = prevKRel;
           }
         }
+        prevKRel = kRel;
+        letters[i] = NATURAL_LETTERS[k];
       }
-      prevK = k;
-      letters[i] = NATURAL_LETTERS[(R + k) % 7];
     }
-  }
 
-  return intervals.map((iv, i) => {
-    const pc = (rootIdx + iv) % 12;
-    const letter = letters[i];
-    let diff = (((pc - naturalPcOf(letter)) % 12) + 12) % 12;
-    if (diff > 6) diff -= 12;
-    const accidental = diff === 0 ? null : diff > 0 ? "#" : "b";
-    const name = accidental ? letter + (accidental === "b" ? "b".repeat(-diff) : "#".repeat(diff)) : letter;
-    return { pc, letter, accidental, diff, name, octave: 4 + Math.floor((rootIdx + iv) / 12) };
-  });
+    return intervals.map((iv, i) => {
+      const pc = (rootIdx + iv) % 12;
+      const letter = letters[i];
+      let diff = (((pc - naturalPcOf(letter)) % 12) + 12) % 12;
+      if (diff > 6) diff -= 12;
+      const accidental = diff === 0 ? null : diff > 0 ? "#" : "b";
+      const name = accidental ? letter + (accidental === "b" ? "b".repeat(-diff) : "#".repeat(diff)) : letter;
+      return { pc, letter, accidental, diff, name, octave: 4 + Math.floor((rootIdx + iv) / 12) };
+    });
+  };
+
+  let seq = spellWith(dir);
+  if (seq.some((n) => Math.abs(n.diff) > 1)) {
+    // the preferred direction forces a double accidental (e.g. C# minor as Db minor) —
+    // re-spell in the other direction, which stays readable.
+    seq = spellWith(dir === "flat" ? "sharp" : "flat");
+  }
+  return seq;
 }
 
 // ---------- fretboard geometry ----------
+
+// the key signature for a scale, derived from its parent major key (the relative major
+// for minor-family scales). Returns the accidental letters in standard circle-of-fifths
+// order (F C G D A E B for sharps, B E A D G C F for flats). Blues / chromatic scales
+// that contain chromatic neighbours get the clean signature of the underlying key.
+const SHARP_KEY_LETTERS = ["F", "C", "G", "D", "A", "E", "B"];
+const FLAT_KEY_LETTERS = ["B", "E", "A", "D", "G", "C", "F"];
+
+export function keySignatureOfScale(rootIdx, intervals) {
+  if (intervals.length > 8) return []; // chromatic / 12-tone runs have no key signature
+  const all = intervals.slice(0, intervals.length - 1);
+  // the key signature comes from the scale's parent key: a major 3rd (4 semitones)
+  // means the scale is major-family and its own root keys it (E major blues = E major,
+  // not the relative minor — the b3 note doesn't change the key). Otherwise use the
+  // relative major (A minor -> C major, D dorian -> C major, …).
+  const family = all.includes(4) ? "major" : "minor";
+  const relMajor = family === "minor" ? (rootIdx + 3) % 12 : rootIdx;
+  // spell the parent major key the same way the scale itself is spelled, so an
+  // Eb-keyed scale (flat spelling) gets the flat signature of Gb major, not F# major's.
+  const scaleSpelled = spelledScaleSequence(rootIdx, [...intervals, 12]);
+  const hasSharps = scaleSpelled.some((n) => n.diff > 0);
+  const hasFlats = scaleSpelled.some((n) => n.diff < 0);
+  const dir = hasFlats && !hasSharps ? "flat" : hasSharps ? "sharp" : undefined;
+  const relSpelled = spelledScaleSequence(relMajor, [0, 2, 4, 5, 7, 9, 11, 12], dir);
+  const byLetter = new Map();
+  for (const n of relSpelled) if (!byLetter.has(n.letter)) byLetter.set(n.letter, n.diff || 0);
+  const sharps = [],
+    flats = [];
+  for (const [letter, diff] of byLetter) {
+    if (diff > 0) sharps.push(letter);
+    else if (diff < 0) flats.push(letter);
+  }
+  if (sharps.length && flats.length) return [];
+  const order = sharps.length ? SHARP_KEY_LETTERS : FLAT_KEY_LETTERS;
+  const accs = sharps.length ? sharps : flats;
+  accs.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  return accs.map((letter) => ({ letter, glyph: sharps.length ? "♯" : "♭" }));
+}
 
 // real fret spacing: frets compress toward the body, following the 12th-root-of-2 scale.
 export function fretFraction(n) {

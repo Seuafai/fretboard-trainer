@@ -1,7 +1,8 @@
+import { useEffect, useRef } from "react";
 import { fretFraction, STRINGS } from "../theory.js";
 
 // a full-neck SVG fretboard with wood grain, pearl inlays and fret markers.
-export default function FretboardSVG({ maxFret, activeStrings, markers, pulse, guitarStrings = STRINGS, highlightString, highlightColor = "#e0a95f", highlightKey, onCellClick, clickableAll }) {
+export default function FretboardSVG({ maxFret, activeStrings, markers, pulse, guitarStrings = STRINGS, highlightString, highlightColor = "#e0a95f", highlightKey, onCellClick, clickableAll, followFret }) {
   const boardLeft = 46;
   const totalWidth = 54 * maxFret;
   const boardWidth = boardLeft + totalWidth + 26;
@@ -10,12 +11,22 @@ export default function FretboardSVG({ maxFret, activeStrings, markers, pulse, g
   const boardHeight = rowHeight * (guitarStrings.length - 1) + 28;
   const inlayFrets = [3, 5, 7, 9, 12, 15, 17, 19, 21, 24];
   const scale = fretFraction(maxFret) || 1;
+  const scrollRef = useRef(null);
 
   const fretX = (n) => boardLeft + (fretFraction(n) / scale) * totalWidth;
   const cellMidX = (n) => (n === 0 ? boardLeft - 17 : (fretX(n - 1) + fretX(n)) / 2);
 
+  // follow the note being played or heard: scroll the neck so that fret stays centred
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || followFret == null) return;
+    const x = cellMidX(followFret);
+    const max = el.scrollWidth - el.clientWidth;
+    el.scrollTo({ left: Math.max(0, Math.min(x - el.clientWidth / 2, max)), behavior: "smooth" });
+  }, [followFret]);
+
   return (
-    <div style={{ overflowX: "auto", background: "#100e0b", border: "1px solid #5c4530", borderRadius: 10, padding: "12px 6px", boxShadow: "0 6px 18px #00000055 inset" }}>
+    <div ref={scrollRef} style={{ overflowX: "auto", background: "#100e0b", border: "1px solid #5c4530", borderRadius: 10, padding: "12px 6px", boxShadow: "0 6px 18px #00000055 inset" }}>
       <style>{`
         @keyframes ftStringPulse { 0%,100% { opacity: 0.45; } 50% { opacity: 1; } }
         .ft-string-hl { animation: ftStringPulse 1.15s ease-in-out infinite; }
@@ -51,6 +62,11 @@ export default function FretboardSVG({ maxFret, activeStrings, markers, pulse, g
             <stop offset="0%" stopColor="#f3ead9" />
             <stop offset="55%" stopColor="#e0a95f" />
             <stop offset="100%" stopColor="#e0a95f00" />
+          </radialGradient>
+          <radialGradient id="heardglow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#7cb37a" />
+            <stop offset="55%" stopColor="#7cb37a" />
+            <stop offset="100%" stopColor="#7cb37a00" />
           </radialGradient>
         </defs>
 
@@ -150,6 +166,8 @@ export default function FretboardSVG({ maxFret, activeStrings, markers, pulse, g
           return (
             <g key={i} onClick={m.onClick} style={{ cursor: m.onClick ? "pointer" : "default" }}>
               {isPulse && <circle cx={x} cy={y} r={18} fill="url(#markerglow2)" opacity={0.7} />}
+              {m.playing && <circle cx={x} cy={y} r={18} fill="url(#markerglow2)" opacity={0.8} />}
+              {m.heard && <circle cx={x} cy={y} r={18} fill="url(#heardglow)" opacity={0.85} />}
               <circle cx={x} cy={y} r={m.r ?? (m.big ? 12 : m.filled ? 10 : 9)} fill={m.filled ? m.color : "transparent"} stroke={m.color} strokeWidth={m.filled ? 1.5 : 2} />
               {(m.finger != null || m.label != null) && (
                 <text x={x} y={y + 3.5} fontSize={m.fs ?? (m.big ? 9 : 8)} fontWeight={700} textAnchor="middle" className="ft-mono" fill={m.filled ? "#14171c" : "#e0a95f"}>

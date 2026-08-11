@@ -6,16 +6,40 @@ import { Chip, TuneBanner } from "./components/shared.jsx";
 import TunerPage from "./components/TunerPage.jsx";
 import FindMode from "./components/FindMode.jsx";
 import ScalesMode from "./components/ScalesMode.jsx";
-import CalibrationTest from "./components/CalibrationTest.jsx";
+import "./assets/fonts.css"; // fonts are bundled locally so the app needs no internet
 
 const MAX_FRET = 23; // a standard 23-fret neck — lets every CAGED form (incl. the G form at the 15th) fit in every key
+
+// true when the viewing platform is wider than it is tall — landscape phones, tablets,
+// and every desktop monitor. Portrait phones keep the single-column layout; landscape
+// gets the wide fretboard-first layout.
+function useOrientation() {
+  const [landscape, setLandscape] = useState(() => typeof window !== "undefined" && window.innerWidth > window.innerHeight);
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const q = window.matchMedia("(orientation: landscape)");
+    const onChange = (e) => setLandscape(e.matches);
+    setLandscape(q.matches);
+    q.addEventListener("change", onChange);
+    return () => q.removeEventListener("change", onChange);
+  }, []);
+  return landscape;
+}
 
 export default function FretboardTrainer() {
   const [page, setPage] = useState("tuner");
   const [tuningPresetId, setTuningPresetId] = useState("standard");
   const [activeStrings, setActiveStrings] = useState(STRINGS.map((s) => s.id));
   const [tuning, setTuning] = useState(null); // null = loading; holds mic-CALIBRATED frequencies (separate from the tuning preset above)
+  const [settingsOpen, setSettingsOpen] = useState(true); // the settings panel, collapsed by default on short landscape screens
   const mic = useMic();
+  const landscape = useOrientation();
+
+  // close the settings panel when entering landscape (screen height is scarce); a manual
+  // toggle afterwards is respected until the next rotation into landscape
+  useEffect(() => {
+    if (landscape) setSettingsOpen(false);
+  }, [landscape]);
 
   const tuningPreset = TUNING_PRESETS.find((t) => t.id === tuningPresetId) || TUNING_PRESETS[0];
   const guitarStrings = useMemo(() => tunedStrings(tuningPreset.notes), [tuningPreset]);
@@ -74,23 +98,26 @@ export default function FretboardTrainer() {
     return () => window.removeEventListener("ft-go-find", goFind);
   }, []);
 
+  // the mic is a single global resource toggled by the header button. The scales page
+  // temporarily mutes it during playback (see playRun), and shuts it down on unmount.
+  useEffect(() => () => mic.stop(), [mic.stop]);
+
   function toggleString(id) {
     setActiveStrings((prev) => (prev.includes(id) ? (prev.length > 1 ? prev.filter((s) => s !== id) : prev) : [...prev, id]));
   }
 
   return (
-    <div
-      style={{
-        background: "radial-gradient(1100px 520px at 18% -10%, #1d2431 0%, #12151a 55%, #0d1016 100%)",
-        minHeight: "100%",
-        padding: "28px 18px 36px",
-        fontFamily: "'Inter', system-ui, sans-serif",
-        color: "#f3ead9",
-        boxSizing: "border-box",
-      }}
-    >
+      <div
+        style={{
+          background: "radial-gradient(1100px 520px at 18% -10%, #1d2431 0%, #12151a 55%, #0d1016 100%)",
+          minHeight: "100%",
+          padding: landscape ? "14px 14px 26px" : "28px 18px 36px",
+          fontFamily: "'Inter', system-ui, sans-serif",
+          color: "#f3ead9",
+          boxSizing: "border-box",
+        }}
+      >
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Bitter:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap');
         .ft-title { font-family: 'Bitter', Georgia, serif; }
         .ft-mono { font-family: 'JetBrains Mono', monospace; }
         .ft-note-btn { transition: transform 0.08s ease, box-shadow 0.15s ease, background 0.15s ease; }
@@ -105,23 +132,24 @@ export default function FretboardTrainer() {
         @keyframes ftFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
       `}</style>
 
-      <div style={{ maxWidth: 780, margin: "0 auto" }}>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 4 }}>
-          <h1 className="ft-title" style={{ fontSize: 28, margin: 0, letterSpacing: 0.3, background: "linear-gradient(120deg, #f3ead9 0%, #e0a95f 60%, #c98a4a 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+      <div style={{ maxWidth: landscape ? "min(100vw - 24px, 1500px)" : 780, margin: "0 auto" }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: landscape ? 0 : 4 }}>
+          <h1 className="ft-title" style={{ fontSize: landscape ? 22 : 28, margin: 0, letterSpacing: 0.3, background: "linear-gradient(120deg, #f3ead9 0%, #e0a95f 60%, #c98a4a 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
             Fretboard Trainer
           </h1>
-          <span className="ft-mono" style={{ fontSize: 12, color: "#e0a95f", letterSpacing: 1 }}>
+          <span className="ft-mono" style={{ fontSize: landscape ? 10 : 12, color: "#e0a95f", letterSpacing: 1 }}>
             LEARN EVERY NOTE, EVERY STRING
           </span>
         </div>
-        <p style={{ margin: "0 0 18px", color: "#9aa2ac", fontSize: 14, lineHeight: 1.5 }}>
-          {page === "tuner" && "Get in tune — it quietly teaches the app your guitar's voice (pitch and timbre) at the same time."}
-          {page === "find" && "Find a note on each string by ear, or name a lit fret with a click — your choice."}
-          {page === "scales" && "Pick a scale and key, see every note lit across the neck, then tap to shape your own pattern — save it for later."}
-          {page === "calibrate" && "Record your guitar's timbre at every shared-note spot so Find It knows which string you actually played."}
-        </p>
+        {!landscape && (
+          <p style={{ margin: "0 0 18px", color: "#9aa2ac", fontSize: 14, lineHeight: 1.5 }}>
+            {page === "tuner" && "Get in tune — it quietly teaches the app your guitar's voice (pitch and timbre) at the same time. The calibrate tab records your guitar's timbre at every shared-note spot."}
+            {page === "find" && "Find a note on each string by ear, or name a lit fret with a click — your choice."}
+            {page === "scales" && "Pick a scale and key, see every note lit across the neck, then tap to shape your own pattern — save it for later."}
+          </p>
+        )}
 
-        <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: landscape ? 10 : 18, flexWrap: "wrap", alignItems: "center" }}>
           <Chip active={page === "tuner"} onClick={() => setPage("tuner")}>
             Tuner
           </Chip>
@@ -131,9 +159,26 @@ export default function FretboardTrainer() {
           <Chip active={page === "scales"} onClick={() => setPage("scales")}>
             Scales
           </Chip>
-          <Chip active={page === "calibrate"} onClick={() => setPage("calibrate")}>
-            Calibrate
-          </Chip>
+          <span style={{ flex: 1 }} />
+          <button
+            onClick={() => (mic.status === "active" ? mic.stop() : mic.start())}
+            disabled={mic.status === "requesting"}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              background: "transparent",
+              border: `1px solid ${mic.status === "active" ? "#7cb37a" : "#2a2f3a"}`,
+              color: mic.status === "active" ? "#7cb37a" : "#9aa2ac",
+              borderRadius: 8,
+              padding: "6px 14px",
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            <span style={{ width: 8, height: 8, borderRadius: 999, background: mic.status === "active" ? "#7cb37a" : mic.status === "error" ? "#e08a71" : "#4a5160" }} />
+            {mic.status === "active" ? "Mic on" : mic.status === "requesting" ? "Mic…" : mic.status === "error" ? "Mic error" : "Mic off"}
+          </button>
         </div>
 
         {page !== "tuner" && <TuneBanner tuning={tuning} onGoTune={() => setPage("tuner")} guitarStrings={guitarStrings} />}
@@ -142,37 +187,43 @@ export default function FretboardTrainer() {
           <div style={{ textAlign: "center", color: "#5a6270", padding: 30 }}>loading…</div>
         ) : (
           <div className="ft-fade" key={page}>
-            {page === "tuner" && <TunerPage mic={mic} tuning={tuning} onUpdateTuning={updateTuning} guitarStrings={guitarStrings} />}
+            {page === "tuner" && <TunerPage mic={mic} tuning={tuning} onUpdateTuning={updateTuning} onUpdateSpot={updateSpot} maxFret={MAX_FRET} guitarStrings={guitarStrings} />}
             {page === "find" && <FindMode mic={mic} maxFret={MAX_FRET} activeStrings={activeStrings} tuning={tuning} onGoTune={() => setPage("tuner")} guitarStrings={guitarStrings} />}
-            {page === "scales" && <ScalesMode maxFret={MAX_FRET} activeStrings={activeStrings} guitarStrings={guitarStrings} tuning={tuning} />}
-            {page === "calibrate" && <CalibrationTest mic={mic} tuning={tuning} onUpdateSpot={updateSpot} maxFret={MAX_FRET} guitarStrings={guitarStrings} />}
+            {page === "scales" && <ScalesMode maxFret={MAX_FRET} activeStrings={activeStrings} guitarStrings={guitarStrings} tuning={tuning} mic={mic} />}
           </div>
         )}
 
-        <div style={{ background: "#1b1f27", border: "1px solid #2a2f3a", borderRadius: 10, padding: 16, marginTop: 22 }}>
-          <div className="ft-mono" style={{ fontSize: 11, letterSpacing: 1, color: "#e0a95f", marginBottom: 10 }}>
-            SETTINGS
-          </div>
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Tuning</div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {TUNING_PRESETS.map((t) => (
-                <Chip key={t.id} active={tuningPresetId === t.id} onClick={() => setTuningPresetId(t.id)}>
-                  {t.label}
-                </Chip>
-              ))}
+        <div style={{ background: "#1b1f27", border: "1px solid #2a2f3a", borderRadius: 10, padding: 16, marginTop: landscape ? 12 : 22 }}>
+          <div onClick={() => setSettingsOpen((o) => !o)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", userSelect: "none" }}>
+            <div className="ft-mono" style={{ fontSize: 11, letterSpacing: 1, color: "#e0a95f" }}>
+              SETTINGS
             </div>
+            <span style={{ color: "#7a8290", fontSize: 13 }}>{settingsOpen ? "▾" : "▸"}</span>
           </div>
-          <div>
-            <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Strings</div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {[...guitarStrings].reverse().map((s) => (
-                <Chip key={s.id} active={activeStrings.includes(s.id)} onClick={() => toggleString(s.id)}>
-                  {s.open} string
-                </Chip>
-              ))}
-            </div>
-          </div>
+          {settingsOpen && (
+            <>
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Tuning</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {TUNING_PRESETS.map((t) => (
+                    <Chip key={t.id} active={tuningPresetId === t.id} onClick={() => setTuningPresetId(t.id)}>
+                      {t.label}
+                    </Chip>
+                  ))}
+                </div>
+              </div>
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Strings</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {[...guitarStrings].reverse().map((s) => (
+                    <Chip key={s.id} active={activeStrings.includes(s.id)} onClick={() => toggleString(s.id)}>
+                      {s.open} string
+                    </Chip>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

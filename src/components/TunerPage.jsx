@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { StatCard } from "./shared.jsx";
+import { Segmented, StatCard } from "./shared.jsx";
+import CalibrationTest from "./CalibrationTest.jsx";
 import { STRINGS, centsBetween } from "../theory.js";
 
 // each string needs CAL_PLUCKS steady plucks before its calibration is stored —
@@ -46,7 +47,8 @@ function TunerGauge({ cents, active }) {
   );
 }
 
-export default function TunerPage({ mic, tuning, onUpdateTuning, guitarStrings }) {
+export default function TunerPage({ mic, tuning, onUpdateTuning, onUpdateSpot, guitarStrings, maxFret }) {
+  const [view, setView] = useState("tune"); // "tune" | "calibrate"
   const [reading, setReading] = useState(null);
   const [detectedString, setDetectedString] = useState(null);
   const [lockProgress, setLockProgress] = useState(0);
@@ -146,11 +148,26 @@ export default function TunerPage({ mic, tuning, onUpdateTuning, guitarStrings }
 
   return (
     <div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 20 }}>
-        <StatCard label="Strings tuned" value={`${tunedCount} / ${guitarStrings.length}`} />
-        <StatCard label="Detecting" value={detectedString ? STRINGS.find((s) => s.id === detectedString).label : "–"} />
-        <StatCard label="Status" value={mic.status === "active" ? "listening" : mic.status} />
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
+        <Segmented
+          options={[
+            { value: "tune", label: "Tune" },
+            { value: "calibrate", label: "Calibrate strings" },
+          ]}
+          value={view}
+          onChange={setView}
+        />
       </div>
+
+      {view === "calibrate" ? (
+        <CalibrationTest mic={mic} tuning={tuning} onUpdateSpot={onUpdateSpot} maxFret={maxFret} guitarStrings={guitarStrings} />
+      ) : (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 20 }}>
+            <StatCard label="Strings tuned" value={`${tunedCount} / ${guitarStrings.length}`} />
+            <StatCard label="Detecting" value={detectedString ? STRINGS.find((s) => s.id === detectedString).label : "–"} />
+            <StatCard label="Status" value={mic.status === "active" ? "listening" : mic.status} />
+          </div>
 
       {mic.status !== "active" && (
         <div style={{ textAlign: "center", padding: "22px 16px", border: "1px dashed #2a2f3a", borderRadius: 10, marginBottom: 20 }}>
@@ -225,6 +242,8 @@ export default function TunerPage({ mic, tuning, onUpdateTuning, guitarStrings }
       <p style={{ fontSize: 12, color: "#5a6270", marginTop: 14, textAlign: "center" }}>
         Pluck each open string in tune <strong>3 times</strong> — the tuner averages the samples for a robust timbre profile. This teaches the app your guitar's exact pitch and timbre, so practice modes recognize only your guitar (a tune on the TV won't count), and Find It can tell which string you're playing even for notes that exist on two strings.
       </p>
+        </>
+      )}
     </div>
   );
 }

@@ -56,3 +56,18 @@ commands needed on your end. Every future `git push` auto-redeploys.
   they're per-device/per-browser, not synced across devices.
 - The mic-based "Find It" mode and the Tuner both need microphone
   permission — the browser will prompt for it the first time.
+- Scales are spelled the way they're written in the key: each degree of a
+  7-note scale gets its own letter (D minor → `D E F G A B♭ C`, not
+  `D E F G A A♯ C`), pentatonic/blues/arpeggio notes get the natural
+  letter they sit nearest in the key's direction (`G blues` → `G B♭ C D♭
+  D F`), and the spelling direction switches so no double accidentals
+  ever appear (C♯ minor → `C♯ D♯ E F♯ G♯ A B`, never `D♭ E♭ F♭ G♭ A♭
+  B♭♭ C♭`). The notation view renders those spellings on the staff, with
+  the root/3rd/5th coloured to match the fretboard highlight.
+- The app is fully offline-capable: notes are synthesized in-browser via
+  the Web Audio API (no samples), and the fonts are bundled locally, so
+  nothing is fetched from the network once the page has loaded.
+- The Scales page can auto-scroll the neck to follow the note being
+  played or heard, and the layout widens into a fretboard-first view on
+  landscape / desktop screens (the settings panel collapses to save
+  height).
