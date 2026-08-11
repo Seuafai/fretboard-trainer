@@ -86,7 +86,7 @@ function MenuSelect({ label, value, onChange, options }) {
   );
 }
 
-export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuning, mic, landscape, fill }) {
+export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuning, mic, landscape, fill, onExit }) {
   const prefs = useRef(savedPrefs());
   const [rootIdx, setRootIdx] = useState(() => prefs.current.key ?? 0); // index into CHROMATIC
   const [scaleId, setScaleId] = useState(() => prefs.current.scale ?? "major");
@@ -740,9 +740,85 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
     </div>
   ) : null;
 
+  // full-screen handheld landscape: every control lives in one slim, horizontally
+  // scrollable bar so the fretboard/notation gets (almost) the whole screen. The ✕
+  // leaves the fill view; it sits outside the scroll area so it's always reachable.
+  const compactBar = (
+    <div style={{ display: "flex", gap: 6, alignItems: "center", background: "#12151a", border: "1px solid #2a2f3a", borderRadius: 8, padding: "6px 8px" }}>
+      {onExit && (
+        <button
+          onClick={onExit}
+          title="Leave full-screen scales"
+          style={{ background: "transparent", border: "1px solid #3a4a5a", color: "#9aa2ac", borderRadius: 8, width: 30, height: 30, fontSize: 14, cursor: "pointer", flexShrink: 0 }}
+        >
+          ✕
+        </button>
+      )}
+      <div style={{ display: "flex", gap: 8, flexWrap: "nowrap", alignItems: "center", overflowX: "auto" }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "#e0a95f", whiteSpace: "nowrap" }}>{scaleName}</span>
+        <MenuSelect
+          label="Key"
+          value={rootIdx}
+          onChange={(v) => setRootIdx(Number(v))}
+          options={CHROMATIC.map((n, i) => ({ value: i, label: displayName(n) }))}
+        />
+        <MenuSelect
+          label="Scale"
+          value={scaleId}
+          onChange={setScaleId}
+          options={SCALE_PATTERNS.map((sc) => ({ value: sc.id, label: sc.label }))}
+        />
+        {viewToggle}
+        {modeToggle}
+        <MenuSelect
+          label="Tempo"
+          value={bpm}
+          onChange={(v) => setBpm(Number(v))}
+          options={[50, 60, 70, 80, 90, 100, 110, 120, 140, 160, 180, 200].map((b) => ({ value: b, label: `${b} BPM` }))}
+        />
+        <Segmented
+          options={[
+            { value: "up", label: "Up" },
+            { value: "down", label: "Down" },
+            { value: "updown", label: "Up & Down" },
+            { value: "downup", label: "Down & Up" },
+          ]}
+          value={direction}
+          onChange={setDirection}
+        />
+        <MenuSelect
+          label="Start on"
+          value={effectiveStartMidi}
+          onChange={(v) => setStartMidi(Number(v))}
+          options={startOptions}
+        />
+        <button
+          onClick={() => (mic && mic.status === "active" ? mic.stop() : mic && mic.start())}
+          disabled={mic && mic.status === "requesting"}
+          style={{ background: "transparent", border: "1px solid #4a6a4a", color: mic && mic.status === "active" ? "#7cb37a" : "#9aa2ac", borderRadius: 8, padding: "7px 12px", fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}
+        >
+          {mic && mic.status === "active" ? "Mic on" : mic && mic.status === "requesting" ? "Mic…" : "Mic off"}
+        </button>
+        <button
+          onClick={() => setAutoscroll((a) => !a)}
+          style={{ background: "transparent", border: "1px solid #3a4a5a", color: autoscroll ? "#6ba5e8" : "#9aa2ac", borderRadius: 8, padding: "7px 12px", fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}
+        >
+          {autoscroll ? "Auto-scroll on" : "Auto-scroll off"}
+        </button>
+        {statusText}
+        {shapeChips && <span style={{ fontSize: 13, color: "#9aa2ac", whiteSpace: "nowrap" }}>Shape</span>}
+        {shapeChips}
+        {labelsControl}
+        {highlightControl}
+      </div>
+    </div>
+  );
+
   if (landscape) {
     return (
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+        {fill ? compactBar : (
+          <>
         <div style={{ display: "flex", gap: 8, flexWrap: "nowrap", alignItems: "center", overflowX: "auto" }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: "#e0a95f", whiteSpace: "nowrap" }}>{scaleName}</span>
           <MenuSelect
@@ -804,6 +880,8 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
           {labelsControl}
           {highlightControl}
         </div>
+          </>
+        )}
         <div style={{ flex: 1, minHeight: 0, position: "relative", display: "flex" }}>
           <div ref={areaRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", paddingRight: 2, ...(fill ? { display: "flex", flexDirection: "column" } : {}) }}>
             {noShapesBox}

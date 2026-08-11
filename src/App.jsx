@@ -173,14 +173,16 @@ export default function FretboardTrainer() {
           ...(scalesLandscape ? { height: FULL_SCREEN_H, display: "flex", flexDirection: "column" } : {}),
         }}
       >
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: landscape ? 0 : 4 }}>
-          <h1 className="ft-title" style={{ fontSize: landscape ? 22 : 28, margin: 0, letterSpacing: 0.3, background: "linear-gradient(120deg, #f3ead9 0%, #e0a95f 60%, #c98a4a 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-            Fretboard Trainer
-          </h1>
-          <span className="ft-mono" style={{ fontSize: landscape ? 10 : 12, color: "#e0a95f", letterSpacing: 1 }}>
-            LEARN EVERY NOTE, EVERY STRING
-          </span>
-        </div>
+        {!scalesLandscape && (
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: landscape ? 0 : 4 }}>
+            <h1 className="ft-title" style={{ fontSize: landscape ? 22 : 28, margin: 0, letterSpacing: 0.3, background: "linear-gradient(120deg, #f3ead9 0%, #e0a95f 60%, #c98a4a 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+              Fretboard Trainer
+            </h1>
+            <span className="ft-mono" style={{ fontSize: landscape ? 10 : 12, color: "#e0a95f", letterSpacing: 1 }}>
+              LEARN EVERY NOTE, EVERY STRING
+            </span>
+          </div>
+        )}
         {!landscape && (
           <p style={{ margin: "0 0 18px", color: "#9aa2ac", fontSize: 14, lineHeight: 1.5 }}>
             {page === "tuner" && "Get in tune — it quietly teaches the app your guitar's voice (pitch and timbre) at the same time. The calibrate tab records your guitar's timbre at every shared-note spot."}
@@ -189,37 +191,39 @@ export default function FretboardTrainer() {
           </p>
         )}
 
-        <div style={{ display: "flex", gap: 8, marginBottom: landscape ? 10 : 18, flexWrap: "wrap", alignItems: "center" }}>
-          <Chip active={page === "tuner"} onClick={() => setPage("tuner")}>
-            Tuner
-          </Chip>
-          <Chip active={page === "find"} onClick={() => setPage("find")}>
-            Find It
-          </Chip>
-          <Chip active={page === "scales"} onClick={() => setPage("scales")}>
-            Scales
-          </Chip>
-          <span style={{ flex: 1 }} />
-          <button
-            onClick={() => (mic.status === "active" ? mic.stop() : mic.start())}
-            disabled={mic.status === "requesting"}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              background: "transparent",
-              border: `1px solid ${mic.status === "active" ? "#7cb37a" : "#2a2f3a"}`,
-              color: mic.status === "active" ? "#7cb37a" : "#9aa2ac",
-              borderRadius: 8,
-              padding: "6px 14px",
-              fontSize: 13,
-              cursor: "pointer",
-            }}
-          >
-            <span style={{ width: 8, height: 8, borderRadius: 999, background: mic.status === "active" ? "#7cb37a" : mic.status === "error" ? "#e08a71" : "#4a5160" }} />
-            {mic.status === "active" ? "Mic on" : mic.status === "requesting" ? "Mic…" : mic.status === "error" ? "Mic error" : "Mic off"}
-          </button>
-        </div>
+        {!scalesLandscape && (
+          <div style={{ display: "flex", gap: 8, marginBottom: landscape ? 10 : 18, flexWrap: "wrap", alignItems: "center" }}>
+            <Chip active={page === "tuner"} onClick={() => setPage("tuner")}>
+              Tuner
+            </Chip>
+            <Chip active={page === "find"} onClick={() => setPage("find")}>
+              Find It
+            </Chip>
+            <Chip active={page === "scales"} onClick={() => setPage("scales")}>
+              Scales
+            </Chip>
+            <span style={{ flex: 1 }} />
+            <button
+              onClick={() => (mic.status === "active" ? mic.stop() : mic.start())}
+              disabled={mic.status === "requesting"}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                background: "transparent",
+                border: `1px solid ${mic.status === "active" ? "#7cb37a" : "#2a2f3a"}`,
+                color: mic.status === "active" ? "#7cb37a" : "#9aa2ac",
+                borderRadius: 8,
+                padding: "6px 14px",
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: 999, background: mic.status === "active" ? "#7cb37a" : mic.status === "error" ? "#e08a71" : "#4a5160" }} />
+              {mic.status === "active" ? "Mic on" : mic.status === "requesting" ? "Mic…" : mic.status === "error" ? "Mic error" : "Mic off"}
+            </button>
+          </div>
+        )}
 
         {page !== "tuner" && !scalesLandscape && <TuneBanner tuning={tuning} onGoTune={() => setPage("tuner")} guitarStrings={guitarStrings} />}
 
@@ -229,7 +233,7 @@ export default function FretboardTrainer() {
           <div className="ft-fade" key={page} style={scalesLandscape ? { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" } : undefined}>
             {page === "tuner" && <TunerPage mic={mic} tuning={tuning} onUpdateTuning={updateTuning} onUpdateSpot={updateSpot} maxFret={MAX_FRET} guitarStrings={guitarStrings} />}
             {page === "find" && <FindMode mic={mic} maxFret={MAX_FRET} activeStrings={activeStrings} tuning={tuning} onGoTune={() => setPage("tuner")} guitarStrings={guitarStrings} />}
-            {page === "scales" && <ScalesMode maxFret={MAX_FRET} activeStrings={activeStrings} guitarStrings={guitarStrings} tuning={tuning} mic={mic} landscape={landscape} fill={handheld && landscape} />}
+            {page === "scales" && <ScalesMode maxFret={MAX_FRET} activeStrings={activeStrings} guitarStrings={guitarStrings} tuning={tuning} mic={mic} landscape={landscape} fill={handheld && landscape} onExit={() => setPage("tuner")} />}
           </div>
         )}
 
