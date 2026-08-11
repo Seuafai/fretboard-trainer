@@ -221,7 +221,7 @@ export default function FretboardTrainer() {
           </button>
         </div>
 
-        {page !== "tuner" && <TuneBanner tuning={tuning} onGoTune={() => setPage("tuner")} guitarStrings={guitarStrings} />}
+        {page !== "tuner" && !scalesLandscape && <TuneBanner tuning={tuning} onGoTune={() => setPage("tuner")} guitarStrings={guitarStrings} />}
 
         {tuning === null ? (
           <div style={{ textAlign: "center", color: "#5a6270", padding: 30 }}>loading…</div>
@@ -233,7 +233,8 @@ export default function FretboardTrainer() {
           </div>
         )}
 
-        <div style={{ background: "#1b1f27", border: "1px solid #2a2f3a", borderRadius: 10, padding: 16, marginTop: landscape ? 12 : 22 }}>
+        {!scalesLandscape && (
+          <div style={{ background: "#1b1f27", border: "1px solid #2a2f3a", borderRadius: 10, padding: 16, marginTop: landscape ? 12 : 22 }}>
           <div onClick={() => setSettingsOpen((o) => !o)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", userSelect: "none" }}>
             <div className="ft-mono" style={{ fontSize: 11, letterSpacing: 1, color: "#e0a95f" }}>
               SETTINGS
@@ -264,7 +265,8 @@ export default function FretboardTrainer() {
               </div>
             </>
           )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

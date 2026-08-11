@@ -555,7 +555,9 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
     if (!el) return;
     const update = () => {
       const target = fill ? fillRef.current : el;
-      setAreaH(target ? target.clientHeight : 0);
+      // floor of 140px: even if the controls crowd a short screen, the board never
+      // collapses to a clipped 0-height — it overflows and stays reachable by scroll
+      setAreaH(Math.max(target ? target.clientHeight : 0, 140));
     };
     update();
     const ro = new ResizeObserver(update);
@@ -741,7 +743,7 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
   if (landscape) {
     return (
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "nowrap", alignItems: "center", overflowX: "auto" }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: "#e0a95f", whiteSpace: "nowrap" }}>{scaleName}</span>
           <MenuSelect
             label="Key"
@@ -758,7 +760,7 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
           {viewToggle}
           {modeToggle}
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "nowrap", alignItems: "center", overflowX: "auto" }}>
           <MenuSelect
             label="Tempo"
             value={bpm}
@@ -784,20 +786,20 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
           <button
             onClick={() => (mic && mic.status === "active" ? mic.stop() : mic && mic.start())}
             disabled={mic && mic.status === "requesting"}
-            style={{ background: "transparent", border: "1px solid #4a6a4a", color: mic && mic.status === "active" ? "#7cb37a" : "#9aa2ac", borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: "pointer" }}
+            style={{ background: "transparent", border: "1px solid #4a6a4a", color: mic && mic.status === "active" ? "#7cb37a" : "#9aa2ac", borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}
           >
             {mic && mic.status === "active" ? "Mic on" : mic && mic.status === "requesting" ? "Mic…" : "Mic off"}
           </button>
           <button
             onClick={() => setAutoscroll((a) => !a)}
-            style={{ background: "transparent", border: "1px solid #3a4a5a", color: autoscroll ? "#6ba5e8" : "#9aa2ac", borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: "pointer" }}
+            style={{ background: "transparent", border: "1px solid #3a4a5a", color: autoscroll ? "#6ba5e8" : "#9aa2ac", borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}
           >
             {autoscroll ? "Auto-scroll on" : "Auto-scroll off"}
           </button>
           {statusText}
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          {shapeChips && <span style={{ fontSize: 13, color: "#9aa2ac" }}>Shape</span>}
+        <div style={{ display: "flex", gap: 8, flexWrap: "nowrap", alignItems: "center", overflowX: "auto" }}>
+          {shapeChips && <span style={{ fontSize: 13, color: "#9aa2ac", whiteSpace: "nowrap" }}>Shape</span>}
           {shapeChips}
           {labelsControl}
           {highlightControl}
