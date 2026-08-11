@@ -1,11 +1,12 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Segmented, StatCard } from "./shared.jsx";
 import CalibrationTest from "./CalibrationTest.jsx";
-import { STRINGS, centsBetween } from "../theory.js";
+import { STRINGS, centsBetween, freqToNote, displayName } from "../theory.js";
 
 // each string needs CAL_PLUCKS steady plucks before its calibration is stored —
 // averaging several plucks gives a robust timbre fingerprint for string detection
 const CAL_PLUCKS = 3;
+const TUNER_STYLE_KEY = "ft-tuner-style";
 
 function TunerGauge({ cents, active }) {
   const clamped = Math.max(-50, Math.min(50, cents ?? 0));
@@ -47,8 +48,56 @@ function TunerGauge({ cents, active }) {
   );
 }
 
+// GuitarTuna-style strobe bar: a big note name, a cents readout, and a centre bar
+// that grows flat/sharp and turns green when the string is in tune.
+function StrobeBar({ reading, active }) {
+  const clamped = reading ? Math.max(-50, Math.min(50, reading.cents)) : 0;
+  const color = !active ? "#4a5160" : Math.abs(clamped) < 5 ? "#7cb37a" : Math.abs(clamped) < 20 ? "#e0a95f" : "#d9694e";
+  const note = reading ? freqToNote(reading.freq) : null;
+  const name = note ? displayName(note.name) : "–";
+  const bar = 300;
+  const half = bar / 2;
+  const seg = Math.round((Math.abs(clamped) / 50) * half);
+  const growLeft = clamped <= 0;
+  return (
+    <div style={{ width: "100%", maxWidth: 380, display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "6px 0" }}>
+      <div className="ft-title" style={{ fontSize: 46, lineHeight: 1, color: active ? (color === "#7cb37a" ? "#7cb37a" : "#f2f4f8") : "#5a6270" }}>
+        {name}
+      </div>
+      <div className="ft-mono" style={{ fontSize: 13, color: active ? color : "#5a6270" }}>
+        {reading ? `${clamped > 0 ? "+" : ""}${Math.round(clamped)}¢` : "–"}
+      </div>
+      <div style={{ position: "relative", width: bar, height: 20 }}>
+        <div style={{ position: "absolute", left: 0, right: 0, top: 8, height: 5, borderRadius: 3, background: "#1b1f27", border: "1px solid #2a2f3a" }} />
+        <div style={{ position: "absolute", left: half - 1, top: 4, width: 2, height: 12, background: "#e0a95f" }} />
+        {active && (
+          <div
+            style={{
+              position: "absolute",
+              top: 8,
+              height: 5,
+              borderRadius: 3,
+              background: color,
+              transition: "all 0.12s ease",
+              ...(growLeft ? { left: half - seg, width: seg } : { left: half, width: seg }),
+            }}
+          />
+        )}
+      </div>
+      <div style={{ width: bar, display: "flex", justifyContent: "space-between", fontSize: 12, color: "#5a6270" }}>
+        <span>flat</span>
+        <span>sharp</span>
+      </div>
+    </div>
+  );
+}
+
 export default function TunerPage({ mic, tuning, onUpdateTuning, onUpdateSpot, guitarStrings, maxFret }) {
   const [view, setView] = useState("tune"); // "tune" | "calibrate"
+  const [style, setStyle] = useState(() => localStorage.getItem(TUNER_STYLE_KEY) ?? "strobe"); // "strobe" | "needle"
+  useEffect(() => {
+    localStorage.setItem(TUNER_STYLE_KEY, style);
+  }, [style]);
   const [reading, setReading] = useState(null);
   const [detectedString, setDetectedString] = useState(null);
   const [lockProgress, setLockProgress] = useState(0);
@@ -158,6 +207,16 @@ export default function TunerPage({ mic, tuning, onUpdateTuning, onUpdateSpot, g
           onChange={setView}
         />
       </div>
+      <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 18 }}>
+        <Segmented
+          options={[
+            { value: "strobe", label: "Strobe" },
+            { value: "needle", label: "Needle" },
+          ]}
+          value={style}
+          onChange={setStyle}
+        />
+      </div>
 
       {view === "calibrate" ? (
         <CalibrationTest mic={mic} tuning={tuning} onUpdateSpot={onUpdateSpot} maxFret={maxFret} guitarStrings={guitarStrings} />
@@ -216,17 +275,23 @@ export default function TunerPage({ mic, tuning, onUpdateTuning, onUpdateSpot, g
 
         return (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, marginBottom: 8 }}>
-            <TunerGauge cents={reading ? reading.cents : null} active={!!reading} />
-            <div style={{ textAlign: "center", minHeight: 20 }}>
-              {reading ? (
-                <span className="ft-mono" style={{ fontSize: 13, color: "#9aa2ac" }}>
-                  {reading.cents > 0 ? "+" : ""}
-                  {Math.round(reading.cents)}¢ {Math.abs(reading.cents) < 4 ? "· holding…" : ""}
-                </span>
-              ) : (
-                <span style={{ fontSize: 13, color: "#5a6270" }}>{mic.status === "active" ? "waiting for a string…" : ""}</span>
-              )}
-            </div>
+            {style === "needle" ? (
+              <TunerGauge cents={reading ? reading.cents : null} active={!!reading} />
+            ) : (
+              <StrobeBar reading={reading} active={!!reading} />
+            )}
+            {style === "needle" && (
+              <div style={{ textAlign: "center", minHeight: 20 }}>
+                {reading ? (
+                  <span className="ft-mono" style={{ fontSize: 13, color: "#9aa2ac" }}>
+                    {reading.cents > 0 ? "+" : ""}
+                    {Math.round(reading.cents)}¢ {Math.abs(reading.cents) < 4 ? "· holding…" : ""}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 13, color: "#5a6270" }}>{mic.status === "active" ? "waiting for a string…" : ""}</span>
+                )}
+              </div>
+            )}
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
               {orderedIds.map((id) => (

@@ -2,13 +2,18 @@ import { useEffect, useRef } from "react";
 import { fretFraction, STRINGS } from "../theory.js";
 
 // a full-neck SVG fretboard with wood grain, pearl inlays and fret markers.
-export default function FretboardSVG({ maxFret, activeStrings, markers, pulse, guitarStrings = STRINGS, highlightString, highlightColor = "#e0a95f", highlightKey, onCellClick, clickableAll, followFret }) {
+// `height` (optional) forces the board to exactly fill a given height: string rows
+// stretch to use the space, which is how the landscape view fills the screen.
+export default function FretboardSVG({ maxFret, activeStrings, markers, pulse, guitarStrings = STRINGS, highlightString, highlightColor = "#e0a95f", highlightKey, onCellClick, clickableAll, followFret, height }) {
   const boardLeft = 46;
   const totalWidth = 54 * maxFret;
   const boardWidth = boardLeft + totalWidth + 26;
-  const rowHeight = 34;
   const boardTop = 18;
-  const boardHeight = rowHeight * (guitarStrings.length - 1) + 28;
+  const footerH = 24; // room for the fret numbers below the board
+  const naturalBoardHeight = 34 * (guitarStrings.length - 1) + 28;
+  const boardHeight = height != null ? Math.max(80, height - boardTop - footerH) : naturalBoardHeight;
+  const rowH = (boardHeight - 28) / (guitarStrings.length - 1);
+  const svgH = boardTop + boardHeight + footerH;
   const inlayFrets = [3, 5, 7, 9, 12, 15, 17, 19, 21, 24];
   const scale = fretFraction(maxFret) || 1;
   const scrollRef = useRef(null);
@@ -26,12 +31,12 @@ export default function FretboardSVG({ maxFret, activeStrings, markers, pulse, g
   }, [followFret]);
 
   return (
-    <div ref={scrollRef} style={{ overflowX: "auto", background: "#100e0b", border: "1px solid #5c4530", borderRadius: 10, padding: "12px 6px", boxShadow: "0 6px 18px #00000055 inset" }}>
+    <div ref={scrollRef} style={{ overflowX: "auto", height: height != null ? height : undefined, background: "#100e0b", border: "1px solid #5c4530", borderRadius: 10, padding: "12px 6px", boxShadow: "0 6px 18px #00000055 inset" }}>
       <style>{`
         @keyframes ftStringPulse { 0%,100% { opacity: 0.45; } 50% { opacity: 1; } }
         .ft-string-hl { animation: ftStringPulse 1.15s ease-in-out infinite; }
       `}</style>
-      <svg width={boardWidth} height={boardHeight + boardTop + 6} viewBox={`0 0 ${boardWidth} ${boardHeight + boardTop + 6}`}>
+      <svg width={boardWidth} height={boardTop + boardHeight + footerH} viewBox={`0 0 ${boardWidth} ${boardTop + boardHeight + footerH}`}>
         <defs>
           <linearGradient id="woodgrain2" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#6b4a30" />
@@ -107,7 +112,7 @@ export default function FretboardSVG({ maxFret, activeStrings, markers, pulse, g
         ))}
 
         {guitarStrings.map((s, idx) => {
-          const y = boardTop + 14 + idx * rowHeight;
+          const y = boardTop + 14 + idx * rowH;
           const dimmed = !activeStrings.includes(s.id);
           return (
             <g key={s.id} opacity={dimmed ? 0.28 : 1}>
@@ -132,10 +137,10 @@ export default function FretboardSVG({ maxFret, activeStrings, markers, pulse, g
         {highlightString &&
           guitarStrings.map((s, idx) => {
             if (s.id !== highlightString) return null;
-            const y = boardTop + 14 + idx * rowHeight;
+            const y = boardTop + 14 + idx * rowH;
             return (
               <g key={highlightKey || s.id} className="ft-string-hl">
-                <rect x={boardLeft - 8} y={y - rowHeight / 2 + 5} width={fretX(maxFret) - boardLeft + 8} height={rowHeight - 10} rx={5} fill={highlightColor} opacity={0.22} />
+                <rect x={boardLeft - 8} y={y - rowH / 2 + 5} width={fretX(maxFret) - boardLeft + 8} height={rowH - 10} rx={5} fill={highlightColor} opacity={0.22} />
                 <line x1={boardLeft - 8} x2={fretX(maxFret)} y1={y} y2={y} stroke={highlightColor} strokeWidth={Math.max(2, s.thickness + 1)} strokeLinecap="round" opacity={0.9} />
               </g>
             );
@@ -146,13 +151,13 @@ export default function FretboardSVG({ maxFret, activeStrings, markers, pulse, g
           guitarStrings.map((s) => {
             if (highlightString && s.id !== highlightString) return null;
             const idx = guitarStrings.indexOf(s);
-            const y = boardTop + 14 + idx * rowHeight;
+            const y = boardTop + 14 + idx * rowH;
             const cells = [];
             for (let f = 0; f <= maxFret; f++) {
               const x0 = f === 0 ? boardLeft - 34 : fretX(f - 1);
               const x1 = f === 0 ? boardLeft : fretX(f);
               cells.push(
-                <rect key={f} x={x0} y={y - rowHeight / 2} width={x1 - x0} height={rowHeight} fill="transparent" style={{ cursor: "pointer" }} onClick={() => onCellClick(s.id, f)} />
+                <rect key={f} x={x0} y={y - rowH / 2} width={x1 - x0} height={rowH} fill="transparent" style={{ cursor: "pointer" }} onClick={() => onCellClick(s.id, f)} />
               );
             }
             return <g key={s.id}>{cells}</g>;
@@ -160,7 +165,7 @@ export default function FretboardSVG({ maxFret, activeStrings, markers, pulse, g
 
         {markers.map((m, i) => {
           const idx = guitarStrings.findIndex((s) => s.id === m.stringId);
-          const y = boardTop + 14 + idx * rowHeight;
+          const y = boardTop + 14 + idx * rowH;
           const x = cellMidX(m.fret);
           const isPulse = pulse && pulse.stringId === m.stringId && pulse.fret === m.fret;
           return (

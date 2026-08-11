@@ -166,11 +166,15 @@ export function useMic() {
 
 // ---------- guitar synthesis & scale playback ----------
 
-// Plucks a guitar-like note with additive synthesis: a stack of sine partials at
-// 1, 2, 3 … times the fundamental, each quieter than the last (1/√n) and decaying
-// faster the higher it is — the same harmonic rolloff a plucked string has — plus a
-// short filtered noise burst for the pick's attack. Purely in-tune (no feedback-loop
-// phase drift) and no samples required.
+// Plucks a guitar-like note with Karplus–Strong synthesis. The plucked-string
+// waveform is computed sample-by-sample in JS: a windowed noise burst (the pick)
+// circulates through a delay of exactly one string period, with a one-pole lowpass
+// that closes over the note's life (the "darkening" a string's stiffness produces)
+// and a per-sample damping so the note rings out naturally. The period is fractional
+// and the delay read is interpolated, so the pitch is sample-accurate on every fret.
+// Computing the loop in JS instead of with a DelayNode feedback graph keeps the sound
+// deterministic and exact, and sidesteps per-browser feedback-cycle quirks. No samples
+// required.
 
 let synthCtx = null;
 let playback = null; // { master, endAt } of the currently scheduled run
@@ -188,55 +192,116 @@ function getSynthCtx() {
   return synthCtx;
 }
 
-function pluck(ctx, freq, when, duration, out) {
-  if (!Number.isFinite(freq) || !Number.isFinite(when)) return; // never schedule a bad note
-  const bus = ctx.createGain();
-  bus.gain.value = 0.5;
-  bus.connect(out);
-
-  // the string's harmonic body
-  const partials = Math.min(10, Math.floor(3200 / freq));
-  for (let k = 1; k <= partials; k++) {
-    const osc = ctx.createOscillator();
-    osc.type = "sine";
-    osc.frequency.value = freq * k;
-    const g = ctx.createGain();
-    const amp = 1 / Math.sqrt(k); // louder fundamental, quieter partials
-    g.gain.setValueAtTime(0.0001, when);
-    g.gain.exponentialRampToValueAtTime(amp, when + 0.004); // pluck attack
-    const decay = duration / (1 + 0.5 * (k - 1)); // higher partials fade out sooner
-    g.gain.exponentialRampToValueAtTime(0.0001, when + decay);
-    osc.connect(g);
-    g.connect(bus);
-    osc.start(when);
-    osc.stop(when + duration + 0.05);
-  }
-
-  // the pick's attack: a burst of noise, band-limited near the note so it just
-  // colours the first few milliseconds rather than clicking
-  const burstLen = Math.max(16, Math.round(ctx.sampleRate * 0.02));
-  const burst = ctx.createBuffer(1, burstLen, ctx.sampleRate);
-  const data = burst.getChannelData(0);
-  for (let i = 0; i < burstLen; i++) data[i] = Math.random() * 2 - 1;
-  const noise = ctx.createBufferSource();
-  noise.buffer = burst;
-  const band = ctx.createBiquadFilter();
-  band.type = "bandpass";
-  band.frequency.value = Math.min(8000, freq * 12);
-  band.Q.value = 1.2;
-  const ng = ctx.createGain();
-  ng.gain.setValueAtTime(0.0001, when);
-  ng.gain.exponentialRampToValueAtTime(0.12, when + 0.001);
-  ng.gain.exponentialRampToValueAtTime(0.0001, when + 0.045);
-  noise.connect(band);
-  band.connect(ng);
-  ng.connect(bus);
-  noise.start(when);
-  noise.stop(when + 0.06);
+// one-pole lowpass coefficient for a cutoff frequency in Hz
+function lowpassCoeff(sr, fc) {
+  return Math.exp((-2 * Math.PI * fc) / sr);
 }
 
+function pluck(ctx, freq, when, duration, out) {
+  if (!Number.isFinite(freq) || !Number.isFinite(when)) return; // never schedule a bad note
+  const sr = ctx.sampleRate;
+  const period = sr / freq; // fractional string period in samples
+  const N = Math.max(2, Math.round(period));
+  const total = Math.ceil(sr * duration) + N;
+  const wave = new Float32Array(total);
+
+  // the pick: one string-period of softly-filtered noise, windowed so the attack
+  // has no hard edges (hard edges are what click).
+  let lp = 0;
+  for (let i = 0; i < N; i++) {
+    const w = 0.5 - 0.5 * Math.cos((2 * Math.PI * (i + 0.5)) / N); // Hann window
+    const n = Math.random() * 2 - 1;
+    lp += 0.4 * (n - lp);
+    wave[i] = (n * 0.6 + lp * 0.4) * w;
+  }
+
+  // the string: the KS loop, reading one period behind the write with interpolation
+  // for exact pitch, damping each pass so the note dies out around `duration`, and a
+  // lowpass that closes from bright to warm — low strings stay warm, high strings open
+  // up and then darken like a real pluck.
+  const perSampleDecay = Math.pow(0.002, 1 / (duration * sr));
+  const start = Math.ceil(period); // the string starts ringing one period in
+  // pass 1 — the string: a pure delay line, reading one period behind the write with
+  // interpolation for exact pitch. Nothing else in the loop: any filtering here would
+  // add phase lag and pull the note flat (a lot, up high). Damping is just a gain.
+  for (let t = start; t < total; t++) {
+    const r = t - period;
+    const r0 = Math.floor(r);
+    const frac = r - r0;
+    const a = wave[r0];
+    const b = wave[r0 + 1] ?? a;
+    wave[t] = (a + (b - a) * frac) * perSampleDecay;
+  }
+
+  // pass 2 — the body: a one-pole lowpass on the OUTPUT whose cutoff closes from
+  // bright to warm across the note. This is what makes a plucked string darken as it
+  // decays, and living outside the loop it can't shift the pitch.
+  const brightFc = Math.min(8000, Math.max(3500, freq * 8)); // low strings warm, high strings bright
+  const warmFc = Math.max(900, brightFc / 3);
+  const brightK = lowpassCoeff(sr, brightFc);
+  const warmK = lowpassCoeff(sr, warmFc);
+  let filt = 0;
+  for (let t = 0; t < total; t++) {
+    const k = t / total; // 0 → 1 across the note
+    const c = brightK + (warmK - brightK) * k;
+    filt += c * (wave[t] - filt);
+    wave[t] = filt;
+  }
+
+  // no clicks: 2 ms fade-in, 30 ms fade-out
+  const atk = Math.min(total, Math.round(sr * 0.002));
+  for (let i = 0; i < atk; i++) wave[i] *= i / atk;
+  const rel = Math.round(sr * 0.03);
+  for (let i = Math.max(atk, total - rel); i < total; i++) wave[i] *= (total - i) / rel;
+
+  // same peak level for every note, whatever the random pick produced
+  let peak = 0;
+  for (let i = 0; i < total; i++) peak = Math.max(peak, Math.abs(wave[i]));
+  const norm = peak > 0 ? 0.5 / peak : 1;
+  for (let i = 0; i < total; i++) wave[i] *= norm;
+
+  const buffer = ctx.createBuffer(1, total, sr);
+  buffer.copyToChannel(wave, 0);
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+
+  // the body: a touch of acoustic resonance at 110 Hz, sub-bass thump gone, and the
+  // very top end rolled off so the tone stays clean instead of wiry.
+  const body = ctx.createBiquadFilter();
+  body.type = "peaking";
+  body.frequency.value = 110;
+  body.gain.value = 2;
+  body.Q.value = 1;
+  const hi = ctx.createBiquadFilter();
+  hi.type = "highpass";
+  hi.frequency.value = 55;
+  hi.Q.value = 0.7;
+  const top = ctx.createBiquadFilter();
+  top.type = "lowpass";
+  top.frequency.value = 9000;
+  top.Q.value = 0.5;
+
+  src.connect(body);
+  body.connect(hi);
+  hi.connect(top);
+  top.connect(out);
+  src.onended = () => {
+    try {
+      body.disconnect();
+      hi.disconnect();
+      top.disconnect();
+    } catch {}
+  };
+  src.start(when);
+}
+
+// how long (seconds) the final note of a scale run keeps ringing after the rest
+// of the run has finished, so the landing note doesn't cut off abruptly
+export const SCALE_RUN_HOLD = 1;
+
 // schedules a whole run of notes on the audio clock. `notes` are in play order
-// and carry a midi number; each one starts `secondsPerNote` after the last.
+// and carry a midi number; each one starts `secondsPerNote` after the last. The
+// last note rings on for SCALE_RUN_HOLD so the run lands instead of stopping.
 export function playScaleRun(notes, secondsPerNote) {
   stopPlayback();
   const ctx = getSynthCtx();
@@ -247,9 +312,10 @@ export function playScaleRun(notes, secondsPerNote) {
   const step = secondsPerNote;
   const dur = step * 1.6;
   notes.forEach((n, i) => {
-    pluck(ctx, midiToFreq(n.midi), ctx.currentTime + i * step, dur, master);
+    const isLast = i === notes.length - 1;
+    pluck(ctx, midiToFreq(n.midi), ctx.currentTime + i * step, isLast ? dur + SCALE_RUN_HOLD : dur, master);
   });
-  playback = { master, endAt: ctx.currentTime + notes.length * step + dur };
+  playback = { master, endAt: ctx.currentTime + (notes.length - 1) * step + dur + SCALE_RUN_HOLD };
 }
 
 export function stopPlayback() {

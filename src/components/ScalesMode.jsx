@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Chip, Segmented, StatCard } from "./shared.jsx";
 import FretboardSVG from "./FretboardSVG.jsx";
 import NotationStaff from "./NotationStaff.jsx";
-import { playScaleRun, stopPlayback } from "../audio.js";
+import { playScaleRun, stopPlayback, SCALE_RUN_HOLD } from "../audio.js";
 import {
   CHROMATIC,
   SCALE_PATTERNS,
@@ -86,12 +86,12 @@ function MenuSelect({ label, value, onChange, options }) {
   );
 }
 
-export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuning, mic }) {
+export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuning, mic, landscape, fill }) {
   const prefs = useRef(savedPrefs());
   const [rootIdx, setRootIdx] = useState(() => prefs.current.key ?? 0); // index into CHROMATIC
   const [scaleId, setScaleId] = useState(() => prefs.current.scale ?? "major");
   const [startMidi, setStartMidi] = useState(() => prefs.current.startMidi ?? null); // exact on-screen note the run starts on (null = the lowest root)
-  const [direction, setDirection] = useState(() => prefs.current.direction ?? "updown"); // "up" | "down" | "updown"
+  const [direction, setDirection] = useState(() => prefs.current.direction ?? "updown"); // "up" | "down" | "updown" | "downup"
   const [displayMode, setDisplayMode] = useState("fretboard"); // "fretboard" | "notation"
   const [mapMode, setMapMode] = useState("neck"); // "neck" | "shape"
   const [labelMode, setLabelMode] = useState("name"); // "none" | "name" | "degree" (full-neck view)
@@ -106,6 +106,8 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
   const runTimersRef = useRef([]);
   const [heard, setHeard] = useState(null); // { midi, stringId, fret, timbre } — note the mic is hearing (timbre = string confirmed by calibration)
   const heardTimerRef = useRef(null);
+  const areaRef = useRef(null); // the fretboard/notation area, so it can fill the landscape screen
+  const [areaH, setAreaH] = useState(null);
   const [selected, setSelected] = useState([]); // [{ stringId, fret }] — the pattern (defaults to the whole scale on the neck)
   const [patternName, setPatternName] = useState("");
   const [savedPatterns, setSavedPatterns] = useState(loadSavedPatterns);
@@ -250,13 +252,11 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
     const above = fromStart.slice(1);
 
     if (direction === "up") {
-      // mirror of "down": climb to the top of the shape, sweep all the way back down to
-      // the bottom, then climb home to the start note
+      // climb from the chosen degree to the top of the shape, then come straight back
       if (mapMode === "shape") {
+        if (!above.length) return [fromStart[0]];
         const backDown = [...above.slice(0, -1).reverse(), fromStart[0]];
-        if (!above.length) return [fromStart[0], ...below.slice().reverse(), ...below.slice(1), fromStart[0]];
-        if (!below.length) return [fromStart[0], ...above, ...backDown];
-        return [fromStart[0], ...above, ...backDown, ...below.slice().reverse(), ...below.slice(1), fromStart[0]];
+        return [fromStart[0], ...above, ...backDown];
       }
       // the full neck is too long to double every note; climb to the top and come
       // straight back down to the start note
@@ -264,8 +264,14 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
     }
 
     if (direction === "down") {
-      // descend to the bottom of the shape, sweep all the way back up to the top, then
-      // descend home to the start note
+      // descend from the chosen degree to the bottom, then climb straight back home
+      if (!below.length) return fromStart;
+      return [fromStart[0], ...below.slice().reverse(), ...below.slice(1), fromStart[0]];
+    }
+
+    if (direction === "downup") {
+      // mirror of "up & down": descend to the bottom first, sweep all the way back up
+      // to the top, then descend home to the start note
       if (mapMode === "shape") {
         const backDown = [...above.slice(0, -1).reverse(), fromStart[0]];
         if (!below.length) return [fromStart[0], ...above, ...backDown];
@@ -472,7 +478,7 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
         setActiveRunIndex(null);
         setPlaying(false);
         if (mic) mic.start(); // turn the mic on for practice once the playthrough is done
-      }, Math.round((run.length * secondsPerNote + 0.25) * 1000))
+      }, Math.round((run.length * secondsPerNote + 0.25 + SCALE_RUN_HOLD) * 1000))
     );
     runTimersRef.current = timers;
   }, [runSequence, bpm, mic]);
@@ -540,6 +546,287 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
     if (followFret != null) followFretRef.current = followFret;
   }, [followFret]);
 
+  // measure the fretboard/notation area so the fretboard can stretch to fill it in landscape
+  useEffect(() => {
+    const el = areaRef.current;
+    if (!el) return;
+    const update = () => setAreaH(el.clientHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [landscape]);
+
+  const statusText = playing ? (
+    <span style={{ fontSize: 12, color: "#e0a95f" }}>playing…</span>
+  ) : mic && mic.status === "active" ? (
+    <span style={{ fontSize: 12, color: heardNote ? (heardInScale ? "#7cb37a" : "#e08a71") : "#7cb37a" }}>
+      {heardNote ? `hearing ${heardNote}${heardInScale ? " · in scale" : " · not in scale"}` : "listening…"}
+    </span>
+  ) : mic && mic.status === "error" ? (
+    <span style={{ fontSize: 12, color: "#e08a71" }}>mic error</span>
+  ) : null;
+
+  const viewToggle = (
+    <Segmented
+      options={[
+        { value: "fretboard", label: "Fretboard" },
+        { value: "notation", label: "Notation" },
+      ]}
+      value={displayMode}
+      onChange={setDisplayMode}
+    />
+  );
+
+  const modeToggle = (
+    <Segmented
+      options={[
+        { value: "neck", label: "Full neck" },
+        { value: "shape", label: "Scale shape" },
+      ]}
+      value={mapMode}
+      onChange={setMapMode}
+    />
+  );
+
+  const shapeChips = mapMode === "shape" && patternPositions.length > 0 ? (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      {patternPositions.map((p, i) => (
+        <Chip key={p.id || i} active={patternIndex === i} onClick={() => setPatternIndex(i)}>
+          {`Shape ${i + 1}`}
+        </Chip>
+      ))}
+    </div>
+  ) : null;
+
+  const hintBox = displayMode === "fretboard" && mapMode === "neck" ? (
+    <div style={{ textAlign: "center", padding: "12px 16px", border: "1px dashed #2a2f3a", borderRadius: 10, marginBottom: 12 }}>
+      <p style={{ margin: 0, color: "#9aa2ac", fontSize: 14 }}>
+        <strong style={{ color: "#f3ead9" }}>{scaleName}</strong> is lit across the whole neck. Tap a lit note to drop it, tap a dim scale note to add it — build the exact pattern you want to play.
+      </p>
+    </div>
+  ) : null;
+
+  const labelsControl = (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <span style={{ fontSize: 13, color: "#9aa2ac" }}>Labels</span>
+      {mapMode === "shape" ? (
+        <Segmented
+          options={[
+            { value: "finger", label: "Fingers" },
+            { value: "name", label: "Notes" },
+            { value: "degree", label: "Degrees" },
+          ]}
+          value={patternLabelMode}
+          onChange={setPatternLabelMode}
+        />
+      ) : (
+        <Segmented
+          options={[
+            { value: "none", label: "None" },
+            { value: "name", label: "Notes" },
+            { value: "degree", label: "Degrees" },
+          ]}
+          value={labelMode}
+          onChange={setLabelMode}
+        />
+      )}
+    </div>
+  );
+
+  const highlightControl = (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <span style={{ fontSize: 13, color: "#9aa2ac" }}>Highlight</span>
+      <Segmented
+        options={[
+          { value: "none", label: "None" },
+          { value: "root", label: "Root" },
+          { value: "triad", label: "1-3-5" },
+        ]}
+        value={highlightMode}
+        onChange={setHighlightMode}
+      />
+    </div>
+  );
+
+  const fretboardOrNotation = displayMode === "notation" ? (
+    <NotationStaff
+      sequence={runSequence}
+      keySignature={keySignature}
+      highlightPcs={highlightPcs}
+      activeIndex={activeRunIndex}
+      heardMidi={heard ? heard.midi : null}
+    />
+  ) : (
+    <FretboardSVG
+      maxFret={maxFret}
+      activeStrings={activeStrings}
+      markers={mapMode === "neck" ? mapMarkers : patternMarkers}
+      guitarStrings={guitarStrings}
+      onCellClick={mapMode === "neck" ? toggleSpot : undefined}
+      clickableAll={mapMode === "neck"}
+      followFret={followFret}
+    />
+  );
+
+  const fretboardOrNotationFill = displayMode === "notation" ? (
+    <NotationStaff
+      sequence={runSequence}
+      keySignature={keySignature}
+      highlightPcs={highlightPcs}
+      activeIndex={activeRunIndex}
+      heardMidi={heard ? heard.midi : null}
+    />
+  ) : (
+    <FretboardSVG
+      maxFret={maxFret}
+      activeStrings={activeStrings}
+      markers={mapMode === "neck" ? mapMarkers : patternMarkers}
+      guitarStrings={guitarStrings}
+      onCellClick={mapMode === "neck" ? toggleSpot : undefined}
+      clickableAll={mapMode === "neck"}
+      followFret={followFret}
+      height={areaH}
+    />
+  );
+
+  const patternsUI = mapMode === "neck" ? (
+    <div style={{ marginBottom: 20, marginTop: 12 }}>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 12 }}>
+        <input
+          value={patternName}
+          onChange={(e) => setPatternName(e.target.value)}
+          placeholder="Pattern name (e.g. Cmaj7 sweep)"
+          style={{ flex: 1, minWidth: 220, background: "#1b1f27", color: "#f3ead9", border: "1px solid #2a2f3a", borderRadius: 8, padding: "10px 12px", fontSize: 14 }}
+        />
+        <button className="ft-primary-btn" onClick={savePattern} disabled={!patternName.trim() || selected.length === 0}>
+          Save pattern ({selected.length} notes)
+        </button>
+        <Chip active={false} onClick={() => setSelected([])}>
+          Clear
+        </Chip>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {savedPatterns.map((p) => (
+          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 6, background: "#1b1f27", border: "1px solid #2a2f3a", borderRadius: 8, padding: "6px 6px 6px 12px" }}>
+            <span style={{ fontSize: 13, color: "#f3ead9" }}>{p.name}</span>
+            <span style={{ fontSize: 11, color: "#7a8290" }}>{p.spots.length} notes</span>
+            <button onClick={() => loadPattern(p)} style={{ background: "transparent", border: "1px solid #e0a95f", color: "#e0a95f", borderRadius: 6, padding: "4px 10px", fontSize: 12, cursor: "pointer" }}>
+              Load
+            </button>
+            <button onClick={() => deletePattern(p.id)} style={{ background: "transparent", border: "1px solid #3a3030", color: "#b0705f", borderRadius: 6, padding: "4px 8px", fontSize: 12, cursor: "pointer" }}>
+              ✕
+            </button>
+          </div>
+        ))}
+        {savedPatterns.length === 0 && <div style={{ color: "#5a6270", fontSize: 13, padding: "8px 0" }}>No saved patterns yet.</div>}
+      </div>
+    </div>
+  ) : null;
+
+  const noShapesBox = mapMode === "shape" && patternPositions.length === 0 ? (
+    <div style={{ textAlign: "center", padding: "18px 16px", border: "1px dashed #2a2f3a", borderRadius: 10, marginBottom: 14 }}>
+      <p style={{ color: "#9aa2ac", fontSize: 14, margin: 0 }}>No textbook shapes found for this scale.</p>
+    </div>
+  ) : null;
+
+  if (landscape) {
+    return (
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#e0a95f", whiteSpace: "nowrap" }}>{scaleName}</span>
+          <MenuSelect
+            label="Key"
+            value={rootIdx}
+            onChange={(v) => setRootIdx(Number(v))}
+            options={CHROMATIC.map((n, i) => ({ value: i, label: displayName(n) }))}
+          />
+          <MenuSelect
+            label="Scale"
+            value={scaleId}
+            onChange={setScaleId}
+            options={SCALE_PATTERNS.map((sc) => ({ value: sc.id, label: sc.label }))}
+          />
+          {viewToggle}
+          {modeToggle}
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <MenuSelect
+            label="Tempo"
+            value={bpm}
+            onChange={(v) => setBpm(Number(v))}
+            options={[50, 60, 70, 80, 90, 100, 110, 120, 140, 160, 180, 200].map((b) => ({ value: b, label: `${b} BPM` }))}
+          />
+          <Segmented
+            options={[
+              { value: "up", label: "Up" },
+              { value: "down", label: "Down" },
+              { value: "updown", label: "Up & Down" },
+              { value: "downup", label: "Down & Up" },
+            ]}
+            value={direction}
+            onChange={setDirection}
+          />
+          <MenuSelect
+            label="Start on"
+            value={effectiveStartMidi}
+            onChange={(v) => setStartMidi(Number(v))}
+            options={startOptions}
+          />
+          <button
+            onClick={() => (mic && mic.status === "active" ? mic.stop() : mic && mic.start())}
+            disabled={mic && mic.status === "requesting"}
+            style={{ background: "transparent", border: "1px solid #4a6a4a", color: mic && mic.status === "active" ? "#7cb37a" : "#9aa2ac", borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: "pointer" }}
+          >
+            {mic && mic.status === "active" ? "Mic on" : mic && mic.status === "requesting" ? "Mic…" : "Mic off"}
+          </button>
+          <button
+            onClick={() => setAutoscroll((a) => !a)}
+            style={{ background: "transparent", border: "1px solid #3a4a5a", color: autoscroll ? "#6ba5e8" : "#9aa2ac", borderRadius: 8, padding: "8px 14px", fontSize: 13, cursor: "pointer" }}
+          >
+            {autoscroll ? "Auto-scroll on" : "Auto-scroll off"}
+          </button>
+          {statusText}
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          {shapeChips && <span style={{ fontSize: 13, color: "#9aa2ac" }}>Shape</span>}
+          {shapeChips}
+          {labelsControl}
+          {highlightControl}
+        </div>
+        <div style={{ flex: 1, minHeight: 0, position: "relative", display: "flex" }}>
+          <div ref={areaRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", paddingRight: 2 }}>
+            {noShapesBox}
+            {fill ? fretboardOrNotationFill : fretboardOrNotation}
+            {hintBox}
+            {patternsUI}
+          </div>
+          <button
+            onClick={playing ? stopRun : playRun}
+            style={{
+              position: "absolute",
+              bottom: 16,
+              right: 16,
+              width: 64,
+              height: 64,
+              borderRadius: 999,
+              background: "#e0a95f",
+              color: "#14171c",
+              fontSize: 15,
+              fontWeight: 700,
+              border: "none",
+              boxShadow: "0 6px 18px #00000066",
+              cursor: "pointer",
+              zIndex: 5,
+            }}
+          >
+            {playing ? "Stop" : "Play"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginBottom: 20 }}>
@@ -562,16 +849,7 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
         />
       </div>
 
-      <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
-        <Segmented
-          options={[
-            { value: "fretboard", label: "Fretboard" },
-            { value: "notation", label: "Notation" },
-          ]}
-          value={displayMode}
-          onChange={setDisplayMode}
-        />
-      </div>
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>{viewToggle}</div>
 
       <div style={{ display: "flex", justifyContent: "center", gap: 10, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
         <button className="ft-primary-btn" onClick={playing ? stopRun : playRun} style={{ minWidth: 90 }}>
@@ -588,6 +866,7 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
             { value: "up", label: "Up" },
             { value: "down", label: "Down" },
             { value: "updown", label: "Up & Down" },
+            { value: "downup", label: "Down & Up" },
           ]}
           value={direction}
           onChange={setDirection}
@@ -611,150 +890,33 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
         >
           {autoscroll ? "Auto-scroll on" : "Auto-scroll off"}
         </button>
-        {playing ? (
-          <span style={{ fontSize: 12, color: "#e0a95f" }}>playing…</span>
-        ) : mic && mic.status === "active" ? (
-          <span style={{ fontSize: 12, color: heardNote ? (heardInScale ? "#7cb37a" : "#e08a71") : "#7cb37a" }}>
-            {heardNote ? `hearing ${heardNote}${heardInScale ? " · in scale" : " · not in scale"}` : "listening…"}
-          </span>
-        ) : mic && mic.status === "error" ? (
-          <span style={{ fontSize: 12, color: "#e08a71" }}>mic error</span>
-        ) : null}
+        {statusText}
       </div>
 
-      <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
-        <Segmented
-          options={[
-            { value: "neck", label: "Full neck" },
-            { value: "shape", label: "Scale shape" },
-          ]}
-          value={mapMode}
-          onChange={setMapMode}
-        />
-      </div>
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>{modeToggle}</div>
 
-      {mapMode === "shape" && patternPositions.length > 0 && (
+      {shapeChips && (
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 13, color: "#9aa2ac", marginBottom: 6 }}>Shape</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {patternPositions.map((p, i) => (
-              <Chip key={p.id || i} active={patternIndex === i} onClick={() => setPatternIndex(i)}>
-                {`Shape ${i + 1}`}
-              </Chip>
-            ))}
-          </div>
+          {shapeChips}
         </div>
       )}
 
-      {displayMode === "fretboard" && mapMode === "neck" && (
-        <div style={{ textAlign: "center", padding: "12px 16px", border: "1px dashed #2a2f3a", borderRadius: 10, marginBottom: 12 }}>
-          <p style={{ margin: 0, color: "#9aa2ac", fontSize: 14 }}>
-            <strong style={{ color: "#f3ead9" }}>{scaleName}</strong> is lit across the whole neck. Tap a lit note to drop it, tap a dim scale note to add it — build the exact pattern you want to play.
-          </p>
-        </div>
-      )}
+      {hintBox}
 
       {displayMode === "fretboard" && (
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap", justifyContent: "center" }}>
-          <span style={{ fontSize: 13, color: "#9aa2ac" }}>Labels</span>
-          {mapMode === "shape" ? (
-            <Segmented
-              options={[
-                { value: "finger", label: "Fingers" },
-                { value: "name", label: "Notes" },
-                { value: "degree", label: "Degrees" },
-              ]}
-              value={patternLabelMode}
-              onChange={setPatternLabelMode}
-            />
-          ) : (
-            <Segmented
-              options={[
-                { value: "none", label: "None" },
-                { value: "name", label: "Notes" },
-                { value: "degree", label: "Degrees" },
-              ]}
-              value={labelMode}
-              onChange={setLabelMode}
-            />
-          )}
+          {labelsControl}
         </div>
       )}
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14, flexWrap: "wrap", justifyContent: "center" }}>
-        <span style={{ fontSize: 13, color: "#9aa2ac" }}>Highlight</span>
-        <Segmented
-          options={[
-            { value: "none", label: "None" },
-            { value: "root", label: "Root" },
-            { value: "triad", label: "1-3-5" },
-          ]}
-          value={highlightMode}
-          onChange={setHighlightMode}
-        />
+        {highlightControl}
       </div>
 
-      {mapMode === "shape" && patternPositions.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "18px 16px", border: "1px dashed #2a2f3a", borderRadius: 10, marginBottom: 14 }}>
-          <p style={{ color: "#9aa2ac", fontSize: 14, margin: 0 }}>No textbook shapes found for this scale.</p>
-        </div>
-      ) : (
-        <div style={{ marginBottom: 14 }}>
-          {displayMode === "notation" ? (
-            <NotationStaff
-              sequence={runSequence}
-              keySignature={keySignature}
-              highlightPcs={highlightPcs}
-              activeIndex={activeRunIndex}
-              heardMidi={heard ? heard.midi : null}
-            />
-          ) : (
-            <FretboardSVG
-              maxFret={maxFret}
-              activeStrings={activeStrings}
-              markers={mapMode === "neck" ? mapMarkers : patternMarkers}
-              guitarStrings={guitarStrings}
-              onCellClick={mapMode === "neck" ? toggleSpot : undefined}
-              clickableAll={mapMode === "neck"}
-              followFret={followFret}
-            />
-          )}
-        </div>
-      )}
-
-      {mapMode === "neck" && (
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 12 }}>
-            <input
-              value={patternName}
-              onChange={(e) => setPatternName(e.target.value)}
-              placeholder="Pattern name (e.g. Cmaj7 sweep)"
-              style={{ flex: 1, minWidth: 220, background: "#1b1f27", color: "#f3ead9", border: "1px solid #2a2f3a", borderRadius: 8, padding: "10px 12px", fontSize: 14 }}
-            />
-            <button className="ft-primary-btn" onClick={savePattern} disabled={!patternName.trim() || selected.length === 0}>
-              Save pattern ({selected.length} notes)
-            </button>
-            <Chip active={false} onClick={() => setSelected([])}>
-              Clear
-            </Chip>
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {savedPatterns.map((p) => (
-              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 6, background: "#1b1f27", border: "1px solid #2a2f3a", borderRadius: 8, padding: "6px 6px 6px 12px" }}>
-                <span style={{ fontSize: 13, color: "#f3ead9" }}>{p.name}</span>
-                <span style={{ fontSize: 11, color: "#7a8290" }}>{p.spots.length} notes</span>
-                <button onClick={() => loadPattern(p)} style={{ background: "transparent", border: "1px solid #e0a95f", color: "#e0a95f", borderRadius: 6, padding: "4px 10px", fontSize: 12, cursor: "pointer" }}>
-                  Load
-                </button>
-                <button onClick={() => deletePattern(p.id)} style={{ background: "transparent", border: "1px solid #3a3030", color: "#b0705f", borderRadius: 6, padding: "4px 8px", fontSize: 12, cursor: "pointer" }}>
-                  ✕
-                </button>
-              </div>
-            ))}
-            {savedPatterns.length === 0 && <div style={{ color: "#5a6270", fontSize: 13, padding: "8px 0" }}>No saved patterns yet.</div>}
-          </div>
-        </div>
-      )}
+      {noShapesBox}
+      <div style={{ marginBottom: 14 }}>{fretboardOrNotation}</div>
+      {patternsUI}
     </div>
   );
 }

@@ -26,6 +26,22 @@ function useOrientation() {
   return landscape;
 }
 
+// true on touch-first handheld devices (phones, tablets). Only these stretch the
+// fretboard to fill the whole screen in landscape — a desktop monitor would blow the
+// board up to absurd proportions, so it keeps the natural-height fretboard instead.
+function useHandheld() {
+  const [handheld, setHandheld] = useState(() => typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches);
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const q = window.matchMedia("(pointer: coarse)");
+    const onChange = (e) => setHandheld(e.matches);
+    setHandheld(q.matches);
+    q.addEventListener("change", onChange);
+    return () => q.removeEventListener("change", onChange);
+  }, []);
+  return handheld;
+}
+
 export default function FretboardTrainer() {
   const [page, setPage] = useState("tuner");
   const [tuningPresetId, setTuningPresetId] = useState("standard");
@@ -34,6 +50,8 @@ export default function FretboardTrainer() {
   const [settingsOpen, setSettingsOpen] = useState(true); // the settings panel, collapsed by default on short landscape screens
   const mic = useMic();
   const landscape = useOrientation();
+  const handheld = useHandheld();
+  const scalesLandscape = handheld && landscape && page === "scales"; // scales page fills the whole screen on handhelds
 
   // close the settings panel when entering landscape (screen height is scarce); a manual
   // toggle afterwards is respected until the next rotation into landscape
@@ -111,7 +129,7 @@ export default function FretboardTrainer() {
         style={{
           background: "radial-gradient(1100px 520px at 18% -10%, #1d2431 0%, #12151a 55%, #0d1016 100%)",
           minHeight: "100%",
-          padding: landscape ? "14px 14px 26px" : "28px 18px 36px",
+          padding: scalesLandscape ? 0 : landscape ? "14px 14px 26px" : "28px 18px 36px",
           fontFamily: "'Inter', system-ui, sans-serif",
           color: "#f3ead9",
           boxSizing: "border-box",
@@ -132,7 +150,13 @@ export default function FretboardTrainer() {
         @keyframes ftFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
       `}</style>
 
-      <div style={{ maxWidth: landscape ? "min(100vw - 24px, 1500px)" : 780, margin: "0 auto" }}>
+      <div
+        style={{
+          maxWidth: scalesLandscape ? "100vw" : landscape ? "min(100vw - 24px, 1500px)" : 780,
+          margin: "0 auto",
+          ...(scalesLandscape ? { height: "100vh", display: "flex", flexDirection: "column" } : {}),
+        }}
+      >
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: landscape ? 0 : 4 }}>
           <h1 className="ft-title" style={{ fontSize: landscape ? 22 : 28, margin: 0, letterSpacing: 0.3, background: "linear-gradient(120deg, #f3ead9 0%, #e0a95f 60%, #c98a4a 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
             Fretboard Trainer
@@ -186,10 +210,10 @@ export default function FretboardTrainer() {
         {tuning === null ? (
           <div style={{ textAlign: "center", color: "#5a6270", padding: 30 }}>loading…</div>
         ) : (
-          <div className="ft-fade" key={page}>
+          <div className="ft-fade" key={page} style={scalesLandscape ? { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" } : undefined}>
             {page === "tuner" && <TunerPage mic={mic} tuning={tuning} onUpdateTuning={updateTuning} onUpdateSpot={updateSpot} maxFret={MAX_FRET} guitarStrings={guitarStrings} />}
             {page === "find" && <FindMode mic={mic} maxFret={MAX_FRET} activeStrings={activeStrings} tuning={tuning} onGoTune={() => setPage("tuner")} guitarStrings={guitarStrings} />}
-            {page === "scales" && <ScalesMode maxFret={MAX_FRET} activeStrings={activeStrings} guitarStrings={guitarStrings} tuning={tuning} mic={mic} />}
+            {page === "scales" && <ScalesMode maxFret={MAX_FRET} activeStrings={activeStrings} guitarStrings={guitarStrings} tuning={tuning} mic={mic} landscape={landscape} fill={handheld && landscape} />}
           </div>
         )}
 
