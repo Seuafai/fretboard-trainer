@@ -16,7 +16,10 @@ const NATURAL_LETTERS = ["C", "D", "E", "F", "G", "A", "B"];
 // The run always fits the available width: one line at natural spacing when it fits,
 // packed a little tighter when it nearly does, and split across several staff systems
 // (like real sheet music) when one line would get too cramped to read.
-export default function NotationStaff({ sequence, keySignature, highlightPcs, activeIndex, heardMidi }) {
+// `height` (optional) scales the whole staff so it fills exactly that many pixels,
+// keeping the aspect ratio — how the landscape view stretches the notation to use the
+// screen. Without it the staff renders at natural size.
+export default function NotationStaff({ sequence, keySignature, highlightPcs, activeIndex, heardMidi, height }) {
   const lineSpacing = 12;
   const halfStep = lineSpacing / 2;
   const bottomLineY = 96; // E4, the bottom staff line (first system)
@@ -115,11 +118,15 @@ export default function NotationStaff({ sequence, keySignature, highlightPcs, ac
   const sigLetters = new Set(keySig.map((s) => s.letter));
   const inSignature = (n) => sigLetters.has(n.letter) && (n.diff || 0) !== 0;
 
+  const svgScale = height != null && viewH > 0 ? Math.max(80, height - 32) / viewH : 1;
+  const svgW = Math.max(1, Math.ceil(viewW * svgScale));
+  const svgH = Math.max(1, Math.ceil(viewH * svgScale));
+
   return (
-    <div ref={wrapRef} style={{ background: "#100e0b", border: "1px solid #2a2f3a", borderRadius: 10, padding: "16px 6px" }}>
+    <div ref={wrapRef} style={{ background: "#100e0b", border: "1px solid #2a2f3a", borderRadius: 10, padding: "16px 6px", ...(height != null ? { height } : {}), display: "flex", flexDirection: "column", justifyContent: "center" }}>
       {layout ? (
-        <div style={{ overflowX: "auto" }}>
-          <svg viewBox={`0 0 ${viewW} ${viewH}`} style={{ display: "block", width: viewW, height: "auto" }}>
+        <div style={{ overflowX: "auto", overflowY: "hidden" }}>
+          <svg viewBox={`0 0 ${viewW} ${viewH}`} style={{ display: "block", width: svgW, height: svgH, margin: "0 auto" }}>
             <g transform={`translate(0 ${shift})`}>
               {systems.map((s, li) => (
                 <g key={li}>

@@ -107,6 +107,7 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
   const [heard, setHeard] = useState(null); // { midi, stringId, fret, timbre } — note the mic is hearing (timbre = string confirmed by calibration)
   const heardTimerRef = useRef(null);
   const areaRef = useRef(null); // the fretboard/notation area, so it can fill the landscape screen
+  const fillRef = useRef(null); // the fretboard/notation itself — measured so it fills the space it's actually given
   const [areaH, setAreaH] = useState(null);
   const [selected, setSelected] = useState([]); // [{ stringId, fret }] — the pattern (defaults to the whole scale on the neck)
   const [patternName, setPatternName] = useState("");
@@ -546,16 +547,22 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
     if (followFret != null) followFretRef.current = followFret;
   }, [followFret]);
 
-  // measure the fretboard/notation area so the fretboard can stretch to fill it in landscape
+  // measure the space allotted to the fretboard/notation so it can stretch to fill it in
+  // landscape. In fill mode the board sits in a flex-1 wrapper, so measuring that wrapper
+  // (not the whole scroll area) keeps the hint box and pattern-save UI below the fold.
   useEffect(() => {
     const el = areaRef.current;
     if (!el) return;
-    const update = () => setAreaH(el.clientHeight);
+    const update = () => {
+      const target = fill ? fillRef.current : el;
+      setAreaH(target ? target.clientHeight : 0);
+    };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
+    if (fillRef.current) ro.observe(fillRef.current);
     return () => ro.disconnect();
-  }, [landscape]);
+  }, [landscape, fill]);
 
   const statusText = playing ? (
     <span style={{ fontSize: 12, color: "#e0a95f" }}>playing…</span>
@@ -676,6 +683,7 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
       highlightPcs={highlightPcs}
       activeIndex={activeRunIndex}
       heardMidi={heard ? heard.midi : null}
+      height={areaH}
     />
   ) : (
     <FretboardSVG
@@ -795,9 +803,15 @@ export default function ScalesMode({ maxFret, activeStrings, guitarStrings, tuni
           {highlightControl}
         </div>
         <div style={{ flex: 1, minHeight: 0, position: "relative", display: "flex" }}>
-          <div ref={areaRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", paddingRight: 2 }}>
+          <div ref={areaRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", paddingRight: 2, ...(fill ? { display: "flex", flexDirection: "column" } : {}) }}>
             {noShapesBox}
-            {fill ? fretboardOrNotationFill : fretboardOrNotation}
+            {fill ? (
+              <div ref={fillRef} style={{ flex: 1, minHeight: 0 }}>
+                {fretboardOrNotationFill}
+              </div>
+            ) : (
+              fretboardOrNotation
+            )}
             {hintBox}
             {patternsUI}
           </div>

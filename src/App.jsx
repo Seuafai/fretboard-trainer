@@ -10,18 +10,32 @@ import "./assets/fonts.css"; // fonts are bundled locally so the app needs no in
 
 const MAX_FRET = 23; // a standard 23-fret neck — lets every CAGED form (incl. the G form at the 15th) fit in every key
 
+// mobile browsers show the URL bar over part of 100vh; 100dvh tracks the visible
+// viewport, so the landscape fill really reaches the bottom of the screen
+const FULL_SCREEN_H = typeof CSS !== "undefined" && CSS.supports && CSS.supports("height", "100dvh") ? "100dvh" : "100vh";
+
 // true when the viewing platform is wider than it is tall — landscape phones, tablets,
 // and every desktop monitor. Portrait phones keep the single-column layout; landscape
 // gets the wide fretboard-first layout.
 function useOrientation() {
   const [landscape, setLandscape] = useState(() => typeof window !== "undefined" && window.innerWidth > window.innerHeight);
   useEffect(() => {
-    if (!window.matchMedia) return;
-    const q = window.matchMedia("(orientation: landscape)");
-    const onChange = (e) => setLandscape(e.matches);
-    setLandscape(q.matches);
-    q.addEventListener("change", onChange);
-    return () => q.removeEventListener("change", onChange);
+    if (typeof window === "undefined") return;
+    const update = () => setLandscape(window.innerWidth > window.innerHeight);
+    update();
+    window.addEventListener("resize", update);
+    // rotation always triggers a resize, but some mobile browsers never fire the
+    // orientation media-query change event — so listen to both
+    if (window.matchMedia) {
+      const q = window.matchMedia("(orientation: landscape)");
+      const onChange = (e) => setLandscape(e.matches);
+      q.addEventListener?.("change", onChange);
+      return () => {
+        window.removeEventListener("resize", update);
+        q.removeEventListener?.("change", onChange);
+      };
+    }
+    return () => window.removeEventListener("resize", update);
   }, []);
   return landscape;
 }
@@ -30,14 +44,16 @@ function useOrientation() {
 // fretboard to fill the whole screen in landscape — a desktop monitor would blow the
 // board up to absurd proportions, so it keeps the natural-height fretboard instead.
 function useHandheld() {
-  const [handheld, setHandheld] = useState(() => typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches);
+  const [handheld, setHandheld] = useState(
+    () => typeof window !== "undefined" && !!(window.matchMedia && window.matchMedia("(hover: none) and (pointer: coarse)").matches)
+  );
   useEffect(() => {
     if (!window.matchMedia) return;
-    const q = window.matchMedia("(pointer: coarse)");
+    const q = window.matchMedia("(hover: none) and (pointer: coarse)");
     const onChange = (e) => setHandheld(e.matches);
     setHandheld(q.matches);
-    q.addEventListener("change", onChange);
-    return () => q.removeEventListener("change", onChange);
+    q.addEventListener?.("change", onChange);
+    return () => q.removeEventListener?.("change", onChange);
   }, []);
   return handheld;
 }
@@ -154,7 +170,7 @@ export default function FretboardTrainer() {
         style={{
           maxWidth: scalesLandscape ? "100vw" : landscape ? "min(100vw - 24px, 1500px)" : 780,
           margin: "0 auto",
-          ...(scalesLandscape ? { height: "100vh", display: "flex", flexDirection: "column" } : {}),
+          ...(scalesLandscape ? { height: FULL_SCREEN_H, display: "flex", flexDirection: "column" } : {}),
         }}
       >
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: landscape ? 0 : 4 }}>
